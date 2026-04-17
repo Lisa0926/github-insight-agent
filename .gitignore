@@ -1,0 +1,61 @@
+# ===========================================
+# GitHub Insight Agent - .gitignore
+# ===========================================
+
+# 敏感信息和配置
+.env
+.env.*
+!.env.sample
+*.env
+config/api_key.json
+configs/model_configs.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+
+# 构建产物
+build/
+dist/
+*.egg-info/
+*.egg
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+coverage.xml
+
+# 日志
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# MCP 二进制（可选，建议通过 releases 下载）
+bin/github-mcp-server
+
+# 数据目录
+data/
+output/
+tmp/
+
+# Node (如果有前端)
+node_modules/

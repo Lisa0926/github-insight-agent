@@ -1,0 +1,317 @@
+# -*- coding: utf-8 -*-
+"""
+GitHub Toolkit - AgentScope Toolkit 集成
+
+功能:
+- 将 GitHubTool 方法注册为 AgentScope Toolkit 工具
+- 自动从 docstring 生成 JSON Schema
+- 支持 MCP (Model Context Protocol) 集成
+- 支持流式返回和统一调用接口
+"""
+
+from functools import partial
+from typing import Any, Dict, List, Optional
+from agentscope.tool import Toolkit, ToolResponse
+
+from src.core.config_manager import ConfigManager
+from src.tools.github_tool import GitHubTool
+from src.mcp.github_mcp_client import create_github_mcp_client, register_github_mcp_tools
+from src.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def create_github_toolkit(
+    config: Optional[ConfigManager] = None,
+    github_token: Optional[str] = None,
+    use_mcp: bool = True,
+) -> Toolkit:
+    """
+    创建并配置 GitHub Toolkit
+
+    Args:
+        config: 配置管理器实例
+        github_token: GitHub Token（可选，优先从配置读取）
+        use_mcp: 是否启用 GitHub MCP Server（默认 True）
+
+    Returns:
+        已注册 GitHub 工具的 Toolkit 实例
+    """
+    # 创建 Toolkit 并指定可用的工具组
+    toolkit = Toolkit()
+
+    # 创建 github 工具组（默认激活）
+    toolkit.create_tool_group("github", description="GitHub API tools for repository search and analysis", active=True)
+
+    # 创建 github_mcp 工具组（如果使用 MCP）
+    if use_mcp:
+        toolkit.create_tool_group("github_mcp", description="GitHub MCP Server tools", active=True)
+
+    github_tool = GitHubTool(config=config, token=github_token)
+
+    # 尝试注册 MCP 客户端
+    mcp_tool_count = 0
+    if use_mcp:
+        try:
+            mcp_client = create_github_mcp_client(config=config, github_token=github_token)
+            if mcp_client:
+                register_github_mcp_tools(toolkit, mcp_client, group_name="github_mcp")
+                logger.info("GitHub MCP Server connected successfully")
+        except Exception as e:
+            logger.warning(f"MCP Server connection failed, falling back to local tools: {e}")
+            use_mcp = False
+
+    # 1. 注册搜索仓库工具
+    def search_repositories(
+        query: str,
+        sort: str = "stars",
+        order: str = "desc",
+        per_page: int = 10,
+    ) -> ToolResponse:
+        """
+        Search GitHub repositories by keyword.
+
+        Args:
+            query: Search keyword (e.g., "python web framework")
+            sort: Sort field, one of: stars, forks, updated
+            order: Sort order, one of: asc, desc
+            per_page: Number of results per page (1-100)
+
+        Returns:
+            Formatted search results with repository name, stars, language, and description
+        """
+        try:
+            repos = github_tool.search_repositories(
+                query=query,
+                sort=sort,
+                order=order,
+                per_page=per_page,
+            )
+
+            lines = [f"Found {len(repos)} repositories:\n"]
+            for i, repo in enumerate(repos, 1):
+                desc = repo.description or "No description"
+                lines.append(
+                    f"{i}. **{repo.full_name}** | "
+                    f"⭐ {repo.stargazers_count:,} | "
+                    f"💻 {repo.language or 'N/A'} | "
+                    f"{desc[:80]}"
+                )
+
+            return ToolResponse(content=[{"text": "\n".join(lines)}])
+
+        except RuntimeError as e:
+            return ToolResponse.fail(error_message=str(e))
+
+    toolkit.register_tool_function(
+        search_repositories,
+        group_name="github",
+        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+    )
+
+    # 2. 注册获取 README 工具
+    def get_readme(
+        owner: str,
+        repo: str,
+        ref: str = "HEAD",
+        as_plain_text: bool = True,
+    ) -> ToolResponse:
+        """
+        Get the README content of a GitHub repository.
+
+        Args:
+            owner: Repository owner (username or organization)
+            repo: Repository name
+            ref: Branch name or commit SHA (default: HEAD)
+            as_plain_text: If True, remove Markdown formatting
+
+        Returns:
+            README content (plain text or Markdown)
+        """
+        try:
+            readme_content = github_tool.get_readme(owner, repo, ref=ref)
+            if as_plain_text:
+                readme_content = github_tool.clean_readme_text(readme_content)
+            return ToolResponse(content=[{"text": readme_content}])
+
+        except (RuntimeError, ValueError) as e:
+            return ToolResponse.fail(error_message=str(e))
+
+    toolkit.register_tool_function(
+        get_readme,
+        group_name="github",
+        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+    )
+
+    # 3. 注册获取仓库信息工具
+    def get_repo_info(owner: str, repo: str) -> ToolResponse:
+        """
+        Get detailed information about a GitHub repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Repository details including name, stars, forks, language, topics
+        """
+        try:
+            repo_info = github_tool.get_repo_info(owner, repo)
+
+            info_lines = [
+                f"**{repo_info.full_name}**",
+                f"Description: {repo_info.description or 'N/A'}",
+                f"Stars: {repo_info.stargazers_count:,}",
+                f"Forks: {repo_info.forks_count:,}",
+                f"Language: {repo_info.language or 'N/A'}",
+                f"Topics: {', '.join(repo_info.topics) if repo_info.topics else 'N/A'}",
+                f"URL: {repo_info.html_url}",
+            ]
+
+            return ToolResponse(content=[{"text": "\n".join(info_lines)}])
+
+        except (RuntimeError, ValueError) as e:
+            return ToolResponse.fail(error_message=str(e))
+
+    toolkit.register_tool_function(
+        get_repo_info,
+        group_name="github",
+        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+    )
+
+    # 4. 注册项目摘要工具
+    def get_project_summary(
+        owner: str,
+        repo: str,
+        include_readme: bool = True,
+        max_readme_length: int = 3000,
+    ) -> ToolResponse:
+        """
+        Get a comprehensive summary of a GitHub project.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            include_readme: Whether to include cleaned README text
+            max_readme_length: Maximum README character count
+
+        Returns:
+            Project summary with basic info and optional README excerpt
+        """
+        try:
+            summary = github_tool.get_project_summary(
+                owner, repo,
+                max_readme_length=max_readme_length if include_readme else 0,
+            )
+
+            lines = [
+                f"**Project Summary: {summary['full_name']}**",
+                f"",
+                f"📊 Stars: {summary['stars']:,}",
+                f"🔧 Forks: {summary['forks']:,}",
+                f"💻 Language: {summary['language']}",
+                f"📝 Description: {summary['description']}",
+                f"🏷️ Topics: {', '.join(summary['topics']) if summary['topics'] else 'N/A'}",
+            ]
+
+            if include_readme and summary.get("cleaned_readme_text"):
+                readme_preview = summary["cleaned_readme_text"][:max_readme_length]
+                if len(summary["cleaned_readme_text"]) > max_readme_length:
+                    readme_preview += "... (truncated)"
+                lines.extend([
+                    "",
+                    "--- README Preview ---",
+                    readme_preview,
+                ])
+
+            return ToolResponse(content=[{"text": "\n".join(lines)}])
+
+        except (RuntimeError, ValueError) as e:
+            return ToolResponse.fail(error_message=str(e))
+
+    toolkit.register_tool_function(
+        get_project_summary,
+        group_name="github",
+        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+    )
+
+    # 5. 注册速率限制查询工具
+    def check_rate_limit() -> ToolResponse:
+        """
+        Check the current GitHub API rate limit status.
+
+        Returns:
+            Rate limit information including remaining requests and reset time
+        """
+        rate_info = github_tool.check_rate_limit()
+
+        if "error" in rate_info:
+            return ToolResponse.fail(error_message=rate_info["error"])
+
+        lines = [
+            f"**GitHub API Rate Limit**",
+            f"Limit: {rate_info['limit']:,} requests/hour",
+            f"Remaining: {rate_info['remaining']:,} requests",
+            f"Authenticated: {'Yes' if rate_info.get('authenticated') else 'No'}",
+        ]
+
+        if rate_info.get("reset"):
+            lines.append(f"Reset: {rate_info['reset']}")
+
+        return ToolResponse(content=[{"text": "\n".join(lines)}])
+
+    toolkit.register_tool_function(
+        check_rate_limit,
+        group_name="github",
+        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+    )
+
+    logger.info(f"GitHub Toolkit created with {len(toolkit.get_json_schemas())} tools registered (MCP: {mcp_tool_count})")
+    return toolkit
+
+
+def get_github_tool_schemas(toolkit: Toolkit) -> List[Dict[str, Any]]:
+    """
+    获取 GitHub 工具的 JSON Schema 列表
+
+    Args:
+        toolkit: GitHub Toolkit 实例
+
+    Returns:
+        JSON Schema 列表，用于 LLM 工具调用
+    """
+    return toolkit.get_json_schemas()
+
+
+# 便捷函数：获取预设的 GitHub Toolkit
+_github_toolkit_cache: Optional[Toolkit] = None
+
+
+def get_github_toolkit(
+    config: Optional[ConfigManager] = None,
+    github_token: Optional[str] = None,
+    force_new: bool = False,
+    use_mcp: bool = True,
+) -> Toolkit:
+    """
+    获取 GitHub Toolkit 实例（单例模式）
+
+    Args:
+        config: 配置管理器实例
+        github_token: GitHub Token
+        force_new: 是否强制创建新实例
+        use_mcp: 是否启用 GitHub MCP Server
+
+    Returns:
+        GitHub Toolkit 实例
+    """
+    global _github_toolkit_cache
+
+    if force_new or _github_toolkit_cache is None:
+        _github_toolkit_cache = create_github_toolkit(
+            config=config,
+            github_token=github_token,
+            use_mcp=use_mcp,
+        )
+
+    return _github_toolkit_cache
