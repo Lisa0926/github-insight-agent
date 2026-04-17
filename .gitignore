@@ -5,8 +5,8 @@
 # 敏感信息和配置
 .env
 .env.*
-!.env.sample
 *.env
+.env.sample
 config/api_key.json
 configs/model_configs.json
 
