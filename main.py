@@ -613,6 +613,10 @@ if __name__ == "__main__":
             run_interactive_cli()
         elif sys.argv[1] == "--studio":
             show_studio_help()
+        elif sys.argv[1] == "--new":
+            # 启动新版增强 CLI
+            from src.cli.app import main as new_main
+            new_main()
         else:
             main()
     else:
