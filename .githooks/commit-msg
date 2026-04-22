@@ -1,15 +1,60 @@
 #!/bin/sh
-# Git commit-msg hook: Validate commit message follows Conventional Commits format
+# Git commit-msg hook: Validate commit message follows Conventional Commits format in English
 #
 # Installation:
 #   cp .githooks/commit-msg .git/hooks/commit-msg
 #   chmod +x .git/hooks/commit-msg
+#
+# Rules:
+# - All commit messages MUST be in English
+# - Format: <type>(<scope>): <description>
+# - See: https://www.conventionalcommits.org/
 
-commit_msg=$(cat "$1")
+commit_msg_file="$1"
+commit_msg=$(cat "$commit_msg_file")
 
-# Skip merge commits and revert commits
+# Skip merge commits, revert commits, and fixup/squash commits
 if echo "$commit_msg" | grep -qE "^Merge|^Revert|^fixup!|^squash!"; then
     exit 0
+fi
+
+# Check if commit message contains CJK characters using Python for reliable Unicode detection
+if command -v python3 >/dev/null 2>&1; then
+    if python3 -c "
+import sys
+msg = sys.argv[1]
+# Check for CJK Unicode ranges
+cjk_ranges = [
+    (0x4e00, 0x9fff),   # CJK Unified Ideographs
+    (0x3400, 0x4dbf),   # CJK Unified Ideographs Extension A
+    (0x3040, 0x309f),   # Hiragana
+    (0x30a0, 0x30ff),   # Katakana
+    (0xac00, 0xd7af),   # Hangul Syll
+]
+for char in msg:
+    cp = ord(char)
+    for start, end in cjk_ranges:
+        if start <= cp <= end:
+            sys.exit(1)  # Found CJK character
+sys.exit(0)  # No CJK characters
+" "$commit_msg"; then
+        : # Passed CJK check (no CJK characters found)
+    else
+        echo ""
+        echo "❌ Commit message must be in English"
+        echo ""
+        echo "Your message contains non-English characters (Chinese/Japanese/Korean)."
+        echo "Please translate your commit message to English."
+        echo ""
+        echo "Examples:"
+        echo "  ❌ Wrong: feat: 添加新功能"
+        echo "  ✓ Correct: feat: add new feature"
+        echo ""
+        echo "  ❌ Wrong: fix: 修复 bug"
+        echo "  ✓ Correct: fix: fix bug"
+        echo ""
+        exit 1
+    fi
 fi
 
 # Validate Conventional Commits format
@@ -34,15 +79,17 @@ if ! echo "$commit_msg" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|bui
     echo "  security   - Security fixes"
     echo "  deprecate  - Deprecate features"
     echo ""
-    echo "Examples:"
+    echo "Examples (all in English):"
     echo "  feat(llm): add OpenAI provider support"
     echo "  fix(mcp): resolve connection leak"
     echo "  docs: update README"
+    echo "  refactor(cli): extract shared module"
+    echo "  test: add integration tests for MCP"
     echo ""
     echo "See: https://www.conventionalcommits.org/"
     echo ""
     exit 1
 fi
 
-echo "✅ Commit message format valid"
+echo "✅ Commit message format valid (English + Conventional Commits)"
 exit 0
