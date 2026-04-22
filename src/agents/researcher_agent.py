@@ -13,8 +13,6 @@
 
 import json
 from typing import Any, Dict, List, Optional, Union
-import requests
-import os
 import re
 from datetime import datetime, timedelta
 
@@ -62,17 +60,8 @@ class ResearcherAgent:
 
     角色：专业的开源情报研究员
     任务：根据用户查询，使用 GitHub 工具搜索项目，并提取关键信息
-
-    Attributes:
-        name: Agent 名称
-        model_name: 使用的模型名称
-        system_prompt: 系统提示词
-        github_tool: GitHub 工具实例
-        config: 配置管理器
-        memory: 对话记忆
     """
 
-    # 系统提示词模板
     SYSTEM_PROMPT = """你是一个专业的开源情报研究员 (Open Source Intelligence Researcher)。
 
 ## 你的任务
@@ -90,20 +79,6 @@ class ResearcherAgent:
 2. 如果搜索结果为空，如实告知用户
 3. 返回的数据必须来自 API 调用结果
 4. 使用 Markdown 格式呈现结果，便于阅读
-
-## 响应格式示例
-```
-## 搜索结果：{query}
-
-找到 {total_count} 个相关仓库，以下是 Top {n}：
-
-| # | 仓库 | Stars | 语言 | 简介 |
-|---|------|-------|------|------|
-| 1 | owner/repo | 10,000 | Python | 简介... |
-
-### 详细分析
-{分析内容}
-```
 """
 
     def __init__(
@@ -116,18 +91,6 @@ class ResearcherAgent:
         use_persistent: bool = True,
         db_path: str = "data/app.db",
     ):
-        """
-        初始化研究员 Agent
-
-        Args:
-            name: Agent 名称
-            model_name: 模型名称
-            config: 配置管理器
-            use_toolkit: 是否使用 AgentScope Toolkit（默认 True）
-            use_mcp: 是否使用 GitHub MCP Server（默认 True）
-            use_persistent: 是否使用持久化存储（默认 True）
-            db_path: SQLite 数据库路径
-        """
         self.name = name
         self.model_name = model_name
         self.config = config or ConfigManager()
@@ -136,19 +99,14 @@ class ResearcherAgent:
         self.use_mcp = use_mcp
         self.use_persistent = use_persistent
 
-        # 初始化 GitHub 工具
         self.github_tool = GitHubTool(config=self.config)
-
-        # 注册工具到全局注册器
         register_github_tools(self.github_tool)
 
-        # 初始化 AgentScope Toolkit（可选）
         self.toolkit = None
         if use_toolkit:
             self.toolkit = get_github_toolkit(config=self.config, use_mcp=use_mcp)
             logger.info("AgentScope Toolkit initialized with GitHub tools")
 
-        # 对话记忆（持久化或内存）
         if use_persistent:
             self.memory = get_persistent_memory(db_path=db_path)
             logger.info(f"PersistentMemory initialized (db={db_path})")
@@ -156,210 +114,130 @@ class ResearcherAgent:
             self.memory = AgentScopeMemory(max_messages=10)
             logger.info("InMemoryMemory initialized (max_messages=10)")
 
-        # AgentScope DashScopeChatModel (懒加载)
         self._model_wrapper = None
-
         logger.info(f"ResearcherAgent '{name}' initialized with model '{model_name}'")
-        logger.info("GitHub tools registered and ready to use")
 
     def _get_model_wrapper(self):
-        """
-        懒加载 AgentScope DashScopeChatModel
-
-        使用 AgentScope 的 DashScopeChatModel 封装模型调用，
-        支持配置驱动的模型初始化和统一的调用接口。
-
-        注意：如果需要支持多 LLM 后端，请使用 src.llm.provider_factory.get_provider()
-        """
+        """懒加载 AgentScope DashScopeChatModel"""
         if self._model_wrapper is None:
-            try:
-                from agentscope.model import DashScopeChatModel
-
-                # 获取模型配置
-                model_config = self.config.get_model_config(self.model_name)
-
-                # 创建 DashScopeChatModel
-                self._model_wrapper = DashScopeChatModel(
-                    model_name=self.model_name,
-                    api_key=model_config.get("api_key", self.config.dashscope_api_key),
-                )
-
-                logger.info(f"DashScopeChatModel created for model '{self.model_name}'")
-
-            except ImportError as e:
-                logger.error(f"Failed to import AgentScope DashScopeChatModel: {e}")
-                raise
-            except Exception as e:
-                logger.error(f"Failed to create DashScopeChatModel: {e}")
-                raise
-
+            from agentscope.model import DashScopeChatModel
+            model_config = self.config.get_model_config(self.model_name)
+            self._model_wrapper = DashScopeChatModel(
+                model_name=self.model_name,
+                api_key=model_config.get("api_key", self.config.dashscope_api_key),
+            )
+            logger.info(f"DashScopeChatModel created for model '{self.model_name}'")
         return self._model_wrapper
 
-    def get_llm_provider(self):
+    def _parse_time_range(self, user_query: str) -> Optional[int]:
         """
-        获取 LLM Provider（支持多后端）
+        从用户查询中提取时间范围（天数）
 
-        Returns:
-            LLMProvider 实例
-
-        使用示例:
-            provider = agent.get_llm_provider()
-            response = await provider.chat_async(messages)
+        支持的自然语言格式：
+        - 最近 N 天 / 近 N 天 / 过去 N 天
+        - 今天/今日/昨天/本周/本月
+        - N 天内（如：三天内、五天内）
         """
-        from src.llm.provider_factory import get_provider
-
-        # 根据模型名称判断提供商
-        model_name = self.model_name.lower()
-        if model_name.startswith("gpt"):
-            return get_provider(
-                "openai",
-                api_key=self.config.dashscope_api_key,  # 复用环境变量
-                model=self.model_name,
-            )
-        elif model_name.startswith("llama") or model_name.startswith("mistral"):
-            return get_provider(
-                "ollama",
-                model=self.model_name,
-            )
-        else:
-            # 默认使用 DashScope
-            return get_provider(
-                "dashscope",
-                api_key=self.config.dashscope_api_key,
-                model=self.model_name,
-            )
-
-    def _add_to_memory(self, role: str, content: str, name: Optional[str] = None) -> None:
-        """
-        添加消息到记忆 (使用 AgentScope InMemoryMemory)
-
-        Args:
-            role: 角色 (user/assistant/system/tool)
-            content: 消息内容
-            name: 发送者名称
-        """
-        self.memory.add_message(
-            role=role,
-            content=content,
-            name=name or self.name,
-        )
-
-        # 转发到 Studio
-        _forward_to_studio(name or self.name, content, role)
-
-    def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
-        """
-        构建消息历史 (使用 AgentScope InMemoryMemory)
-
-        Args:
-            user_query: 用户查询
-
-        Returns:
-            消息字典列表
-        """
-        messages = [
-            {"name": "system", "content": self.system_prompt, "role": "system"},
-        ]
-
-        # 获取记忆中的消息（包含摘要）
-        memory_messages = self.memory.get_messages_for_prompt()
-        messages.extend(memory_messages)
-
-        # 添加当前查询
-        messages.append({"name": "user", "content": user_query, "role": "user"})
-
-        return messages
-
-    @trace(name="researcher.search_and_analyze")
-    def _parse_search_query(self, user_query: str) -> str:
-        """
-        将自然语言查询转换为 GitHub Search 语法
-
-        Args:
-            user_query: 用户自然语言查询
-
-        Returns:
-            GitHub Search 语法的查询字符串
-        """
-        query = user_query.strip()
-
-        # 检测时间范围关键词（按优先级排序，先匹配长的模式）
-        days = None
-
         # 动态匹配：最近 N 天 / 近 N 天 / 过去 N 天
-        days_match = re.search(r"(?:最近 | 近|过去)\s*(\d+)\s*天", query)
+        days_match = re.search(r"(?:最近 | 近|过去)\s*(\d+)\s*天", user_query)
         if days_match:
-            days = int(days_match.group(1))
-        # 固定匹配
-        elif any(kw in query for kw in ["今天", "今日"]):
-            days = 0
-        elif "昨天" in query:
-            days = 1
-        elif any(kw in query for kw in ["本周", "最近一周"]):
-            days = 7
-        elif any(kw in query for kw in ["本月", "最近一月"]):
-            days = 30
-        # 检测"三天内"这种表达
-        elif "三天内" in query:
-            days = 3
-        elif "五天内" in query:
-            days = 5
-        elif "七天内" in query:
-            days = 7
+            return int(days_match.group(1))
 
-        # 如果检测到时间范围，添加 created 条件
+        # N 天内格式（三天内、五天内等）- 中文数字映射
+        chinese_nums = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        for cn, val in chinese_nums.items():
+            if f"{cn}天内" in user_query:
+                return val
+
+        # 固定匹配
+        if any(kw in user_query for kw in ["今天", "今日"]):
+            return 0
+        if "昨天" in user_query:
+            return 1
+        if any(kw in user_query for kw in ["本周", "最近一周"]):
+            return 7
+        if any(kw in user_query for kw in ["本月", "最近一月"]):
+            return 30
+
+        return None
+
+    def _build_search_params(self, user_query: str) -> dict:
+        """
+        构建 GitHub Search API 参数
+
+        使用简单规则解析：
+        1. 检测时间范围，添加 created 条件
+        2. 提取项目数量（如"前 3 个"）
+        3. 检测排序偏好（star 最高 → sort=stars）
+        """
+        # 默认参数
+        params = {
+            "search_query": user_query,
+            "sort": "stars",
+            "per_page": 10,
+        }
+
+        # 1. 解析时间范围
+        days = self._parse_time_range(user_query)
         if days is not None:
             start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-            # 移除时间关键词，避免干扰搜索
-            time_keywords = [
-                "最近\\s*\\d+\\s*天", "近\\s*\\d+\\s*天", "过去\\s*\\d+\\s*天",
-                "今天", "今日", "昨天", "本周", "最近一周", "本月", "最近一月",
-                "三天内", "五天内", "七天内", "内"
-            ]
-            for kw in time_keywords:
-                query = re.sub(kw, "", query)
-            query = query.strip()
-            # 添加时间范围条件
-            query = f"created:{start_date}..{datetime.now().strftime('%Y-%m-%d')} {query}"
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            params["search_query"] = f"created:{start_date}..{end_date}"
 
-        # 清理多余的空格
-        query = " ".join(query.split())
+        # 2. 提取项目数量
+        count_match = re.search(r"前?\s*(\d+)\s*个", user_query)
+        if count_match:
+            params["per_page"] = min(int(count_match.group(1)), 20)
 
-        return query
+        # 3. 检测排序偏好
+        if "fork" in user_query:
+            params["sort"] = "forks"
+        elif "updated" in user_query or "最新" in user_query:
+            params["sort"] = "updated"
 
+        return params
+
+    @trace(name="researcher.search_and_analyze")
     def search_and_analyze(
         self,
         query: str,
-        sort: str = "stars",
+        sort: str = None,
         order: str = "desc",
-        per_page: int = 10,
+        per_page: int = None,
     ) -> Dict[str, Any]:
         """
         搜索并分析 GitHub 仓库
 
         Args:
             query: 搜索关键词（自然语言或 GitHub Search 语法）
-            sort: 排序字段
+            sort: 排序字段（可选，不传则自动解析）
             order: 排序顺序
-            per_page: 结果数量
+            per_page: 结果数量（可选，不传则自动解析）
 
         Returns:
             搜索结果字典
         """
-        # 将自然语言转换为 GitHub Search 语法
-        search_query = self._parse_search_query(query)
+        # 构建搜索参数（自动解析自然语言）
+        params = self._build_search_params(query)
+
+        # 如果外部指定了 sort/per_page，优先使用
+        if sort:
+            params["sort"] = sort
+        if per_page:
+            params["per_page"] = per_page
+
+        search_query = params["search_query"]
         logger.info(f"Original query: {query}")
-        logger.info(f"Search query: {search_query}")
+        logger.info(f"Search query: {search_query}, sort={params['sort']}, per_page={params['per_page']}")
 
         try:
             repos = self.github_tool.search_repositories(
                 query=search_query,
-                sort=sort,
+                sort=params["sort"],
                 order=order,
-                per_page=per_page,
+                per_page=params["per_page"],
             )
 
-            # 格式化结果
             result = {
                 "query": query,
                 "search_query": search_query,
@@ -390,15 +268,7 @@ class ResearcherAgent:
             }
 
     def generate_summary(self, search_result: Dict[str, Any]) -> str:
-        """
-        生成搜索结果的摘要
-
-        Args:
-            search_result: 搜索结果字典
-
-        Returns:
-            摘要字符串
-        """
+        """生成搜索结果的摘要"""
         if search_result.get("error"):
             return f"搜索失败：{search_result['error']}"
 
@@ -406,7 +276,6 @@ class ResearcherAgent:
         if not repos:
             return "未找到匹配的仓库。"
 
-        # 生成 Markdown 格式的摘要
         lines = [
             f"## 搜索结果：{search_result.get('query', 'Unknown')}",
             "",
@@ -429,86 +298,49 @@ class ResearcherAgent:
                 f"⭐ {repo['stars']:,} | {repo['language'] or 'N/A'} | {desc} |"
             )
 
-        # 添加主题标签
-        top_repo = repos[0] if repos else {}
-        if top_repo.get("topics"):
-            lines.extend([
-                "",
-                "### 热门主题标签",
-                ", ".join(f"`{t}`" for t in top_repo["topics"][:10]),
-            ])
-
         return "\n".join(lines)
 
-    def _extract_search_query(self, user_query: str) -> str:
-        """
-        从用户查询中提取搜索关键词
+    def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
+        """响应用户消息"""
+        if isinstance(msg, str):
+            msg = Msg(name="user", content=msg, role="user")
 
-        Args:
-            user_query: 用户查询
+        self._add_to_memory("user", msg.content, name="user")
+        response_content = self.reply_to_message(msg.content)
+        response = Msg(name=self.name, content=response_content, role="assistant")
+        self._add_to_memory("assistant", response_content)
+        return response
 
-        Returns:
-            搜索关键词
-        """
-        import re
+    def reply_to_message(self, user_query: str) -> str:
+        """响应用户查询"""
+        logger.info(f"Received query: {user_query}")
 
-        query = user_query
+        query_lower = user_query.lower()
+        if any(kw in query_lower for kw in ["搜索", "search", "find", "github", "项目", "仓库"]):
+            search_result = self.search_and_analyze(query=user_query)
+            return self.generate_summary(search_result)
+        else:
+            return self._call_llm(user_query)
 
-        # 移除常见的引导词
-        patterns_to_remove = [
-            r"帮我搜索\s*",
-            r"搜索\s*",
-            r"find\s+",
-            r"search\s+",
-            r"github 上\s*",
-            r"github\s+",
-            r"关于\s*",
-            r"最火的\s*",
-            r"最热门的\s*",
-            r"\d+\s*个\s*",
-            r"python\s*项目\s*",
-            r"python\s+",
-        ]
+    def _add_to_memory(self, role: str, content: str, name: Optional[str] = None) -> None:
+        """添加消息到记忆"""
+        self.memory.add_message(role=role, content=content, name=name or self.name)
+        _forward_to_studio(name or self.name, content, role)
 
-        for pattern in patterns_to_remove:
-            query = re.sub(pattern, "", query, flags=re.IGNORECASE)
-
-        # 提取引号内的内容作为搜索词
-        quoted_match = re.search(r"['\"]([^'\"]+)['\"]", query)
-        if quoted_match:
-            return quoted_match.group(1).strip()
-
-        # 清理剩余内容
-        query = query.strip()
-
-        # 如果为空，使用原始查询
-        if not query:
-            return user_query
-
-        return query
+    def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
+        """构建消息历史"""
+        messages = [{"name": "system", "content": self.system_prompt, "role": "system"}]
+        memory_messages = self.memory.get_messages_for_prompt()
+        messages.extend(memory_messages)
+        messages.append({"name": "user", "content": user_query, "role": "user"})
+        return messages
 
     def _call_llm(self, user_query: str) -> str:
-        """
-        调用 LLM 进行回复 (使用 AgentScope ModelWrapper)
-
-        Args:
-            user_query: 用户查询
-
-        Returns:
-            LLM 响应
-        """
+        """调用 LLM 进行回复"""
         try:
-            # 使用 AgentScope ModelWrapper
             model_wrapper = self._get_model_wrapper()
-
             messages = self._build_messages(user_query)
-
-            # 通过 ModelWrapper 调用模型
-            response = model_wrapper(
-                messages=messages,
-            )
-
-            # 提取响应内容
+            response = model_wrapper(messages=messages)
             content = ""
             if hasattr(response, "text"):
                 content = response.text
@@ -516,21 +348,14 @@ class ResearcherAgent:
                 content = response.get("content", "")
             elif hasattr(response, "__dict__"):
                 content = getattr(response, "content", "") or getattr(response, "text", "")
-
             self._add_to_memory("assistant", content)
             return content
-
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             return f"抱歉，AI 响应失败：{e}"
 
     def get_status(self) -> Dict[str, Any]:
-        """
-        获取 Agent 状态
-
-        Returns:
-            状态字典
-        """
+        """获取 Agent 状态"""
         status = {
             "name": self.name,
             "model": self.model_name,
@@ -541,10 +366,8 @@ class ResearcherAgent:
             "mcp_enabled": self.use_mcp,
             "persistent_enabled": self.use_persistent,
         }
-
         if self.toolkit:
             schemas = self.toolkit.get_json_schemas()
-            # MCP 工具列表
             mcp_tool_names = [
                 'get_commit', 'get_file_contents', 'get_label', 'get_latest_release',
                 'get_me', 'get_release_by_tag', 'get_tag', 'issue_read',
@@ -555,83 +378,8 @@ class ResearcherAgent:
             mcp_schemas = [s for s in schemas if s.get('function', {}).get('name', '') in mcp_tool_names]
             status["toolkit_schemas"] = len(schemas)
             status["mcp_tools_count"] = len(mcp_schemas)
-
         return status
 
     def get_description(self) -> str:
-        """
-        获取 ResearcherAgent 描述
-
-        Returns:
-            Agent 描述字符串
-        """
+        """获取 ResearcherAgent 描述"""
         return "专业的开源情报研究员，擅长使用 GitHub 工具搜索项目并提取关键信息。"
-
-    def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
-        """
-        响应用户消息
-
-        Args:
-            msg: 输入消息 (Msg 对象或字符串)
-            *args: 其他参数
-            **kwargs: 关键字参数
-
-        Returns:
-            响应消息
-        """
-        # 如果是字符串，转换为 Msg
-        if isinstance(msg, str):
-            msg = Msg(name="user", content=msg, role="user")
-
-        # 记录用户消息
-        self._add_to_memory("user", msg.content, name="user")
-
-        # 调用现有逻辑
-        response_content = self.reply_to_message(msg.content)
-
-        # 创建响应
-        response = Msg(name=self.name, content=response_content, role="assistant")
-        self._add_to_memory("assistant", response_content)
-
-        return response
-
-    def reply_to_message(self, user_query: str) -> str:
-        """
-        响应用户查询（原有逻辑）
-
-        Args:
-            user_query: 用户查询
-
-        Returns:
-            响应字符串
-        """
-        logger.info(f"Received query: {user_query}")
-
-        # 简单的意图识别：判断是否需要搜索
-        query_lower = user_query.lower()
-        if any(kw in query_lower for kw in ["搜索", "search", "find", "github", "项目", "仓库"]):
-            # 执行搜索
-            search_query = self._extract_search_query(user_query)
-
-            # 提取 per_page 参数
-            per_page = 10
-            import re
-            match = re.search(r"(\d+)\s*个", user_query)
-            if match:
-                per_page = min(int(match.group(1)), 20)
-
-            logger.info(f"Extracted search query: '{search_query}' (per_page={per_page})")
-
-            # 执行搜索
-            search_result = self.search_and_analyze(
-                query=search_query,
-                per_page=per_page,
-            )
-
-            # 生成摘要
-            summary = self.generate_summary(search_result)
-
-            return summary
-        else:
-            # 非搜索类查询，使用 LLM 直接回复
-            return self._call_llm(user_query)
