@@ -1,0 +1,47 @@
+name: Changelog Generator
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.1.0)'
+        required: true
+        type: string
+
+jobs:
+  generate-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install git-cliff
+        run: |
+          pip install git-cliff
+
+      - name: Generate Changelog
+        run: |
+          git cliff ${{ github.event.inputs.version && format('--tag {0}', github.event.inputs.version) || '--unreleased' }} -o CHANGELOG.md
+
+      - name: Commit and Push Changelog
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add CHANGELOG.md
+          if ! git diff --staged --quiet; then
+            git commit -m "docs: auto-update changelog"
+            git push
+          fi
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: CHANGELOG.md
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -170,8 +170,7 @@ def test_model_connection() -> bool:
 
         dashscope.api_key = api_key
 
-        logger.info(f"Calling API with key: {api_key[:10]}...")
-        logger.info(f"Full API Key in env: {os.getenv('DASHSCOPE_API_KEY', 'NOT SET')}")
+        logger.info("Calling DashScope API (key configured, length: %d)", len(api_key))
 
         response = Generation.call(
             model=model_name,
@@ -603,22 +602,18 @@ def run_interactive_cli():
 
 
 if __name__ == "__main__":
-    # 检查是否传入参数
+    # Check for command-line arguments
     if len(sys.argv) > 1:
         if sys.argv[1] == "--demo":
             run_agent_demo()
         elif sys.argv[1] == "--report":
-            # 获取搜索关键词（可选参数）
             query = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Rust AI framework"
             run_report_workflow(query)
         elif sys.argv[1] == "--cli":
-            # 交互式 CLI 模式（Day 8-10）
             run_interactive_cli()
         elif sys.argv[1] == "--studio":
-            # 显示 Studio 使用说明
             show_studio_help()
         else:
             main()
     else:
-        main()
         main()

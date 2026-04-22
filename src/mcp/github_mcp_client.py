@@ -9,6 +9,8 @@ GitHub MCP Client - AgentScope 集成
 """
 
 import asyncio
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from agentscope.mcp import StdIOStatefulClient
 from src.core.config_manager import ConfigManager

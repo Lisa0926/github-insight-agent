@@ -24,6 +24,7 @@ import requests
 
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
+from src.core.resilient_http import ResilientHTTPClient, RateLimitError
 from src.types.schemas import GitHubRepo, GitHubSearchResult, ToolResponse
 
 logger = get_logger(__name__)
@@ -45,7 +46,7 @@ class GitHubTool:
     """
 
     BASE_URL = "https://api.github.com"
-    MAX_RETRIES = 3
+    MAX_RETRIES = 5  # 增加到 5 次，配合指数退避
     RETRY_DELAY = 1.0
 
     def __init__(
@@ -66,37 +67,39 @@ class GitHubTool:
 
         # 从配置或参数获取 token
         self._token = token or self._config.github_token or os.getenv("GITHUB_TOKEN")
-        self._timeout = timeout or self._config.github_timeout
+        self._timeout = timeout or self._config.github_timeout or 30
 
-        # 初始化 HTTP Session
-        self._session = requests.Session()
+        # 初始化弹性 HTTP 客户端（带指数退避、熔断、限流处理）
+        self._http_client = ResilientHTTPClient(
+            timeout=self._timeout,
+            max_retries=self.MAX_RETRIES,
+            max_wait=60,  # 最大等待 60 秒
+            circuit_breaker_threshold=5,  # 5 次失败后打开熔断器
+            circuit_breaker_timeout=60,   # 熔断器 60 秒后尝试恢复
+        )
 
         # 配置请求头
-        self._setup_headers()
+        self._headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "GitHub-Insight-Agent/0.1.0",
+        }
+
+        if self._token:
+            self._headers["Authorization"] = f"Bearer {self._token}"
+            logger.info("GitHub token configured")
+        else:
+            logger.warning("No GitHub token configured. Rate limits may apply.")
 
         # 速率限制配置
         self._rate_limit = self._config.github_rate_limit
         self._last_request_time: float = 0
+        self._rate_limit_remaining: int = -1  # -1 表示未知
+        self._rate_limit_reset: int = 0
 
         logger.info(
             f"GitHubTool initialized (token: {'configured' if self._token else 'not configured'}, "
-            f"timeout: {self._timeout}s)"
+            f"timeout: {self._timeout}s, max_retries: {self.MAX_RETRIES})"
         )
-
-    def _setup_headers(self) -> None:
-        """设置 HTTP 请求头"""
-        self._session.headers.update({
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "GitHub-Insight-Agent/0.1.0",
-        })
-
-        if self._token:
-            self._session.headers.update({
-                "Authorization": f"Bearer {self._token}",
-            })
-            logger.debug("Authorization header configured")
-        else:
-            logger.warning("No GitHub token configured. Rate limits may apply.")
 
     def _enforce_rate_limit(self) -> None:
         """执行速率限制"""
@@ -120,69 +123,85 @@ class GitHubTool:
         """
         发送 HTTP 请求 (带重试逻辑)
 
+        使用 ResilientHTTPClient 提供:
+        - 指数退避重试
+        - 超时处理
+        - 429 限流优雅降级
+        - 熔断器模式
+
         Args:
             method: HTTP 方法
             endpoint: API 端点
             max_retries: 最大重试次数
-            **kwargs: 传递给 requests 的其他参数
+            **kwargs: 传递给 requests 的参数
 
         Returns:
             ToolResponse 包装的响应
         """
         url = f"{self.BASE_URL}{endpoint}"
-        last_error: Optional[Exception] = None
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                self._enforce_rate_limit()
-                logger.debug(f"Request #{attempt}: {method} {url}")
+        # 合并请求头
+        headers = self._headers.copy()
+        if "headers" in kwargs:
+            headers.update(kwargs["headers"])
+            del kwargs["headers"]
 
-                response = self._session.request(
-                    method, url, timeout=self._timeout, **kwargs
+        try:
+            # 执行限流控制
+            self._enforce_rate_limit()
+
+            logger.debug(f"Request: {method} {url}")
+
+            # 使用弹性 HTTP 客户端发送请求
+            response = self._http_client.request(
+                method,
+                url,
+                timeout=self._timeout,
+                headers=headers,
+                **kwargs,
+            )
+
+            # 提取速率限制信息
+            self._rate_limit_remaining = int(
+                response.headers.get("X-RateLimit-Remaining", -1)
+            )
+            self._rate_limit_reset = int(
+                response.headers.get("X-RateLimit-Reset", 0)
+            )
+
+            # 成功响应
+            return ToolResponse.ok(data=response.json())
+
+        except RateLimitError as e:
+            logger.warning(f"Rate limited: {e}")
+            self._rate_limit_remaining = 0
+            self._rate_limit_reset = int(time.time()) + (e.retry_after or 60)
+            return ToolResponse.fail(
+                error_message=f"Rate limit exceeded. Retry after {e.retry_after or 60}s",
+            )
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            logger.error(f"Request failed: {error_msg}")
+
+            # 提取具体错误信息
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                return ToolResponse.fail(
+                    error_message="Unauthorized: Invalid or expired GitHub token",
                 )
-
-                # 处理不同状态码
-                if response.status_code == 401:
-                    return ToolResponse.fail(
-                        error_message="Unauthorized: Invalid or expired GitHub token",
-                    )
-                elif response.status_code == 403:
-                    # 检查是否是速率限制
-                    if response.headers.get("X-RateLimit-Remaining") == "0":
-                        reset_time = response.headers.get("X-RateLimit-Reset", "unknown")
-                        return ToolResponse.fail(
-                            error_message=f"Rate limit exceeded. Reset at: {reset_time}",
-                        )
-                    return ToolResponse.fail(
-                        error_message=f"Forbidden: Access denied (403)",
-                    )
-                elif response.status_code == 404:
-                    return ToolResponse.fail(
-                        error_message=f"Not Found: {endpoint}",
-                    )
-                elif response.status_code >= 500:
-                    # 服务器错误，可重试
-                    logger.warning(f"Server error {response.status_code}, retrying...")
-                    last_error = Exception(f"Server error: {response.status_code}")
-                    time.sleep(self.RETRY_DELAY * attempt)
-                    continue
-
-                response.raise_for_status()
-                return ToolResponse.ok(data=response.json())
-
-            except requests.exceptions.Timeout as e:
-                last_error = e
-                logger.warning(f"Request timeout (attempt {attempt}/{max_retries})")
-                time.sleep(self.RETRY_DELAY * attempt)
-            except requests.exceptions.RequestException as e:
-                last_error = e
-                logger.error(f"Request failed: {e}")
-                return ToolResponse.fail(error_message=str(e))
-
-        # 所有重试失败
-        return ToolResponse.fail(
-            error_message=f"Request failed after {max_retries} attempts: {last_error}",
-        )
+            elif "403" in error_msg or "Forbidden" in error_msg:
+                return ToolResponse.fail(
+                    error_message="Forbidden: Access denied",
+                )
+            elif "404" in error_msg or "Not Found" in error_msg:
+                return ToolResponse.fail(
+                    error_message=f"Not Found: {endpoint}",
+                )
+            elif "Circuit breaker" in error_msg:
+                return ToolResponse.fail(
+                    error_message="Service temporarily unavailable (circuit breaker open)",
+                )
+            else:
+                return ToolResponse.fail(error_message=error_msg)
 
     def search_repositories(
         self,

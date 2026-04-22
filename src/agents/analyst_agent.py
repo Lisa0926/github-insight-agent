@@ -14,9 +14,8 @@
 """
 
 import json
+import re
 from typing import Any, Dict, List, Optional, Union
-import requests
-import os
 
 from agentscope.message import Msg
 
@@ -24,6 +23,7 @@ from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
 from src.core.agentscope_memory import AgentScopeMemory
 from src.core.agentscope_persistent_memory import PersistentMemory, get_persistent_memory
+from src.core.studio_helper import StudioHelper, set_global_studio_config, forward_to_studio
 from src.tools.github_tool import GitHubTool
 from src.tools.tool_registry import register_github_tools
 from src.tools.github_toolkit import get_github_toolkit
@@ -38,65 +38,21 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Studio 配置（在 AgentScope 初始化时设置）
-_STUDIO_URL: Optional[str] = None
-_RUN_ID: Optional[str] = None
+# Studio 配置助手
+_studio_helper: Optional[StudioHelper] = None
+
 
 def set_studio_config(studio_url: str, run_id: str) -> None:
-    """设置 Studio 配置并注册 run"""
-    global _STUDIO_URL, _RUN_ID
-    _STUDIO_URL = studio_url
-    _RUN_ID = run_id
+    """设置 Studio 配置并注册 run（使用共享模块）"""
+    global _studio_helper
+    _studio_helper = StudioHelper(studio_url, run_id)
+    set_global_studio_config(studio_url, run_id)
+    logger.debug(f"Studio config set for run: {run_id}")
 
-    # 注册 run 到 Studio
-    if studio_url and run_id:
-        try:
-            from datetime import datetime
-            requests.post(
-                f"{studio_url}/trpc/registerRun",
-                json={
-                    "id": run_id,
-                    "project": "GitHub Insight Agent",
-                    "name": run_id,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                    "pid": os.getpid(),
-                    "status": "running",
-                    "run_dir": "",
-                },
-                timeout=5,
-            )
-            logger.debug(f"Registered run {run_id} to Studio at {studio_url}")
-        except Exception as e:
-            logger.debug(f"Failed to register run to Studio: {e}")
 
 def _forward_to_studio(name: str, content: str, role: str) -> None:
-    """手动转发消息到 Studio"""
-    if not _STUDIO_URL or not _RUN_ID:
-        return
-
-    try:
-        from datetime import datetime
-        import uuid
-        requests.post(
-            f"{_STUDIO_URL}/trpc/pushMessage",
-            json={
-                "runId": _RUN_ID,
-                "replyId": name,
-                "replyName": name,
-                "replyRole": role,
-                "msg": {
-                    "id": str(uuid.uuid4()),
-                    "name": name,
-                    "content": content,
-                    "role": role,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                },
-            },
-            timeout=5,
-        )
-        logger.debug(f"Forwarded message to Studio: {name} ({role})")
-    except Exception as e:
-        logger.debug(f"Failed to forward message to Studio: {e}")
+    """手动转发消息到 Studio（使用共享模块）"""
+    forward_to_studio(name, content, role)
 
 
 class AnalystAgent:

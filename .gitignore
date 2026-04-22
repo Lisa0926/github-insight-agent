@@ -59,3 +59,6 @@ tmp/
 
 # Node (如果有前端)
 node_modules/
+
+# Git hooks (源文件在 .githooks/)
+.git/hooks/

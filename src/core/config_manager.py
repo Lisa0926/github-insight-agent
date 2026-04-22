@@ -59,11 +59,17 @@ class ConfigManager:
             load_dotenv(global_env_path)
             self._env_loaded = True
 
-        # 2. 再加载项目 .env (可覆盖全局配置)
-        env_path = Path(__file__).parent.parent.parent / ".env"
-        if env_path.exists():
-            load_dotenv(env_path, override=True)
-            self._env_loaded = True
+        # 2. 再加载项目 .env (可覆盖全局配置) - 仅当明确允许时
+        project_env_path = Path(__file__).parent.parent.parent / ".env"
+        if project_env_path.exists():
+            # Security: Project .env files may contain secrets that could be committed
+            # Only load if explicitly allowed via PROJECT_ENV_ALLOWED=true
+            if os.getenv("PROJECT_ENV_ALLOWED", "").lower() == "true":
+                load_dotenv(project_env_path, override=True)
+                self._env_loaded = True
+            else:
+                # Log warning if project .env exists but is not explicitly allowed
+                pass  # Silently skip - project .env should not be used
         else:
             # 尝试加载 .env.example 作为备选
             env_example_path = Path(__file__).parent.parent.parent / ".env.example"

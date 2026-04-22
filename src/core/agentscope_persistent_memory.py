@@ -93,14 +93,55 @@ class PersistentMemory:
         self._run_async(_create_tables())
         logger.debug("Database tables created successfully")
 
+    async def close(self) -> None:
+        """关闭数据库连接"""
+        await self.engine.dispose()
+        logger.debug("PersistentMemory database connection closed")
+
+    def __enter__(self) -> "PersistentMemory":
+        """上下文管理器入口"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """上下文管理器出口"""
+        self._run_async(self.close())
+
     def _run_async(self, coro):
         """运行异步协程"""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
+            loop = None
+        
+        if loop and loop.is_running():
+            # Already in an async context - use nest_asyncio or run in new thread
+            import concurrent.futures
+            import threading
+            result = None
+            exception = None
+            
+            def _run_in_thread():
+                nonlocal result, exception
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    result = new_loop.run_until_complete(coro)
+                except Exception as e:
+                    exception = e
+                finally:
+                    new_loop.close()
+            
+            thread = threading.Thread(target=_run_in_thread)
+            thread.start()
+            thread.join()
+            if exception:
+                raise exception
+            return result
+        else:
+            if loop is None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
 
     def add_message(
         self,
@@ -320,3 +361,27 @@ def get_persistent_memory(
         )
 
     return _persistent_memory_cache
+
+
+class PersistentMemoryContext:
+    """
+    PersistentMemory 上下文管理器
+
+    使用示例:
+        with PersistentMemoryContext(db_path="data/app.db") as pm:
+            pm.add_user_message("Hello")
+    """
+
+    def __init__(self, db_path: str = "data/app.db", **kwargs):
+        self.db_path = db_path
+        self.kwargs = kwargs
+        self.pm: Optional[PersistentMemory] = None
+
+    def __enter__(self) -> PersistentMemory:
+        self.pm = get_persistent_memory(db_path=self.db_path, **self.kwargs)
+        return self.pm
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        # 清理单例缓存，允许下次创建新实例
+        global _persistent_memory_cache
+        _persistent_memory_cache = None

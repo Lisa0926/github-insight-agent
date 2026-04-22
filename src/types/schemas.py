@@ -13,30 +13,14 @@ Pydantic 数据模型定义
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 
 class GitHubRepoInfo(BaseModel):
     """GitHub 仓库信息模型"""
 
-    name: str = Field(..., description="仓库名称")
-    full_name: str = Field(..., description="完整名称 (owner/repo)")
-    url: HttpUrl = Field(..., description="仓库 URL")
-    description: Optional[str] = Field(None, description="仓库描述")
-    stars: int = Field(0, description="星标数量")
-    forks: int = Field(0, description="Fork 数量")
-    watchers: int = Field(0, description="Watch 数量")
-    open_issues: int = Field(0, description="未关闭 Issue 数量")
-    language: Optional[str] = Field(None, description="主要编程语言")
-    topics: List[str] = Field(default_factory=list, description="仓库主题")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
-    owner: str = Field(..., description="仓库所有者")
-    is_private: bool = Field(False, description="是否为私有仓库")
-    license: Optional[str] = Field(None, description="许可证")
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "github-insight-agent",
                 "full_name": "example/github-insight-agent",
@@ -55,26 +39,30 @@ class GitHubRepoInfo(BaseModel):
                 "license": "MIT",
             }
         }
+    )
+
+    name: str = Field(..., description="仓库名称")
+    full_name: str = Field(..., description="完整名称 (owner/repo)")
+    url: HttpUrl = Field(..., description="仓库 URL")
+    description: Optional[str] = Field(None, description="仓库描述")
+    stars: int = Field(0, description="星标数量")
+    forks: int = Field(0, description="Fork 数量")
+    watchers: int = Field(0, description="Watch 数量")
+    open_issues: int = Field(0, description="未关闭 Issue 数量")
+    language: Optional[str] = Field(None, description="主要编程语言")
+    topics: List[str] = Field(default_factory=list, description="仓库主题")
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
+    owner: str = Field(..., description="仓库所有者")
+    is_private: bool = Field(False, description="是否为私有仓库")
+    license: Optional[str] = Field(None, description="许可证")
 
 
 class GitHubIssueInfo(BaseModel):
     """GitHub Issue 信息模型"""
 
-    number: int = Field(..., description="Issue 编号")
-    title: str = Field(..., description="Issue 标题")
-    url: HttpUrl = Field(..., description="Issue URL")
-    state: str = Field(..., description="状态 (open/closed)")
-    body: Optional[str] = Field(None, description="Issue 正文")
-    user: str = Field(..., description="创建者")
-    labels: List[str] = Field(default_factory=list, description="标签列表")
-    comments: int = Field(0, description="评论数量")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
-    closed_at: Optional[datetime] = Field(None, description="关闭时间")
-    assignees: List[str] = Field(default_factory=list, description="指派人员")
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "number": 1,
                 "title": "Feature request: Add multi-agent support",
@@ -90,32 +78,27 @@ class GitHubIssueInfo(BaseModel):
                 "assignees": ["dev-user"],
             }
         }
+    )
+
+    number: int = Field(..., description="Issue 编号")
+    title: str = Field(..., description="Issue 标题")
+    url: HttpUrl = Field(..., description="Issue URL")
+    state: str = Field(..., description="状态 (open/closed)")
+    body: Optional[str] = Field(None, description="Issue 正文")
+    user: str = Field(..., description="创建者")
+    labels: List[str] = Field(default_factory=list, description="标签列表")
+    comments: int = Field(0, description="评论数量")
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
+    closed_at: Optional[datetime] = Field(None, description="关闭时间")
+    assignees: List[str] = Field(default_factory=list, description="指派人员")
 
 
 class GitHubPRInfo(BaseModel):
     """GitHub Pull Request 信息模型"""
 
-    number: int = Field(..., description="PR 编号")
-    title: str = Field(..., description="PR 标题")
-    url: HttpUrl = Field(..., description="PR URL")
-    state: str = Field(..., description="状态 (open/closed/merged)")
-    body: Optional[str] = Field(None, description="PR 正文")
-    user: str = Field(..., description="创建者")
-    base_branch: str = Field(..., description="目标分支")
-    head_branch: str = Field(..., description="源分支")
-    commits: int = Field(0, description="提交数量")
-    additions: int = Field(0, description="新增行数")
-    deletions: int = Field(0, description="删除行数")
-    changed_files: int = Field(0, description="修改文件数")
-    labels: List[str] = Field(default_factory=list, description="标签列表")
-    reviewers: List[str] = Field(default_factory=list, description="审查人员")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
-    merged_at: Optional[datetime] = Field(None, description="合并时间")
-    merged_by: Optional[str] = Field(None, description="合并操作者")
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "number": 42,
                 "title": "feat: Add GitHub API integration",
@@ -137,6 +120,26 @@ class GitHubPRInfo(BaseModel):
                 "merged_by": None,
             }
         }
+    )
+
+    number: int = Field(..., description="PR 编号")
+    title: str = Field(..., description="PR 标题")
+    url: HttpUrl = Field(..., description="PR URL")
+    state: str = Field(..., description="状态 (open/closed/merged)")
+    body: Optional[str] = Field(None, description="PR 正文")
+    user: str = Field(..., description="创建者")
+    base_branch: str = Field(..., description="目标分支")
+    head_branch: str = Field(..., description="源分支")
+    commits: int = Field(0, description="提交数量")
+    additions: int = Field(0, description="新增行数")
+    deletions: int = Field(0, description="删除行数")
+    changed_files: int = Field(0, description="修改文件数")
+    labels: List[str] = Field(default_factory=list, description="标签列表")
+    reviewers: List[str] = Field(default_factory=list, description="审查人员")
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
+    merged_at: Optional[datetime] = Field(None, description="合并时间")
+    merged_by: Optional[str] = Field(None, description="合并操作者")
 
 
 class AnalysisResult(BaseModel):

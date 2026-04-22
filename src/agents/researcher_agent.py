@@ -22,6 +22,7 @@ from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
 from src.core.agentscope_memory import AgentScopeMemory
 from src.core.agentscope_persistent_memory import PersistentMemory, get_persistent_memory
+from src.core.studio_helper import StudioHelper, set_global_studio_config, forward_to_studio
 from src.tools.github_tool import GitHubTool
 from src.tools.tool_registry import register_github_tools, global_registry
 from src.tools.github_toolkit import get_github_toolkit
@@ -36,66 +37,21 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Studio 配置（在 AgentScope 初始化时设置）
-_STUDIO_URL: Optional[str] = None
-_RUN_ID: Optional[str] = None
+# Studio 配置助手
+_studio_helper: Optional[StudioHelper] = None
+
 
 def set_studio_config(studio_url: str, run_id: str) -> None:
-    """设置 Studio 配置并注册 run"""
-    global _STUDIO_URL, _RUN_ID
-    _STUDIO_URL = studio_url
-    _RUN_ID = run_id
+    """设置 Studio 配置并注册 run（使用共享模块）"""
+    global _studio_helper
+    _studio_helper = StudioHelper(studio_url, run_id)
+    set_global_studio_config(studio_url, run_id)
+    logger.debug(f"Studio config set for run: {run_id}")
 
-    # 注册 run 到 Studio
-    if studio_url and run_id:
-        try:
-            from datetime import datetime
-            import requests
-            requests.post(
-                f"{studio_url}/trpc/registerRun",
-                json={
-                    "id": run_id,
-                    "project": "GitHub Insight Agent",
-                    "name": run_id,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                    "pid": os.getpid(),
-                    "status": "running",
-                    "run_dir": "",
-                },
-                timeout=5,
-            )
-            logger.debug(f"Registered run {run_id} to Studio at {studio_url}")
-        except Exception as e:
-            logger.debug(f"Failed to register run to Studio: {e}")
 
 def _forward_to_studio(name: str, content: str, role: str) -> None:
-    """手动转发消息到 Studio"""
-    if not _STUDIO_URL or not _RUN_ID:
-        return
-
-    try:
-        from datetime import datetime
-        import uuid
-        requests.post(
-            f"{_STUDIO_URL}/trpc/pushMessage",
-            json={
-                "runId": _RUN_ID,
-                "replyId": name,
-                "replyName": name,
-                "replyRole": role,
-                "msg": {
-                    "id": str(uuid.uuid4()),
-                    "name": name,
-                    "content": content,
-                    "role": role,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                },
-            },
-            timeout=5,
-        )
-        logger.debug(f"Forwarded message to Studio: {name} ({role})")
-    except Exception as e:
-        logger.debug(f"Failed to forward message to Studio: {e}")
+    """手动转发消息到 Studio（使用共享模块）"""
+    forward_to_studio(name, content, role)
 
 
 class ResearcherAgent:
@@ -210,6 +166,8 @@ class ResearcherAgent:
 
         使用 AgentScope 的 DashScopeChatModel 封装模型调用，
         支持配置驱动的模型初始化和统一的调用接口。
+
+        注意：如果需要支持多 LLM 后端，请使用 src.llm.provider_factory.get_provider()
         """
         if self._model_wrapper is None:
             try:
@@ -234,6 +192,40 @@ class ResearcherAgent:
                 raise
 
         return self._model_wrapper
+
+    def get_llm_provider(self):
+        """
+        获取 LLM Provider（支持多后端）
+
+        Returns:
+            LLMProvider 实例
+
+        使用示例:
+            provider = agent.get_llm_provider()
+            response = await provider.chat_async(messages)
+        """
+        from src.llm.provider_factory import get_provider
+
+        # 根据模型名称判断提供商
+        model_name = self.model_name.lower()
+        if model_name.startswith("gpt"):
+            return get_provider(
+                "openai",
+                api_key=self.config.dashscope_api_key,  # 复用环境变量
+                model=self.model_name,
+            )
+        elif model_name.startswith("llama") or model_name.startswith("mistral"):
+            return get_provider(
+                "ollama",
+                model=self.model_name,
+            )
+        else:
+            # 默认使用 DashScope
+            return get_provider(
+                "dashscope",
+                api_key=self.config.dashscope_api_key,
+                model=self.model_name,
+            )
 
     def _add_to_memory(self, role: str, content: str, name: Optional[str] = None) -> None:
         """
