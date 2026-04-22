@@ -24,6 +24,7 @@ from src.core.logger import get_logger
 from src.core.config_manager import ConfigManager
 from src.llm.provider_factory import get_provider
 from src.types.schemas import ToolResponse
+from src.tools.owasp_security_rules import OWASPRuleEngine, IssueSeverity as OWASPIssueSeverity, IssueCategory as OWASPIssueCategory
 
 logger = get_logger(__name__)
 
@@ -76,30 +77,11 @@ class PRReviewer:
     分析代码变更，检测问题，生成审查意见。
     """
 
-    # 代码问题检测规则
+    # OWASP 安全规则引擎（50+ 条规则）
+    _owasp_engine: Optional[OWASPRuleEngine] = None
+
+    # 代码问题检测规则（非安全类）
     PATTERNS = {
-        # 安全问题
-        "hardcoded_secret": {
-            "pattern": r"(password|secret|api_key|token|apikey)\s*=\s*['\"][^'\"]+['\"]",
-            "category": IssueCategory.SECURITY,
-            "severity": IssueSeverity.HIGH,
-            "message": "发现硬编码的敏感信息（密码/密钥/Token）",
-            "suggestion": "使用环境变量或配置文件管理敏感信息"
-        },
-        "sql_injection": {
-            "pattern": r"(execute|cursor\.execute)\s*\(\s*f?['\"]SELECT",
-            "category": IssueCategory.SECURITY,
-            "severity": IssueSeverity.CRITICAL,
-            "message": "可能存在 SQL 注入风险",
-            "suggestion": "使用参数化查询，避免字符串拼接 SQL"
-        },
-        "eval_usage": {
-            "pattern": r"\beval\s*\(",
-            "category": IssueCategory.SECURITY,
-            "severity": IssueSeverity.CRITICAL,
-            "message": "使用 eval() 存在代码执行风险",
-            "suggestion": "避免使用 eval()，考虑使用 ast.literal_eval() 或其他安全替代方案"
-        },
         # 性能问题
         "inefficient_loop": {
             "pattern": r"for\s+\w+\s+in\s+\w+.*:\s*\n\s+for\s+\w+\s+in\s+\w+",
@@ -157,6 +139,9 @@ class PRReviewer:
         """
         self._config = config or ConfigManager()
 
+        # 初始化 OWASP 安全规则引擎
+        PRReviewer._owasp_engine = OWASPRuleEngine(config=self._config)
+
         # 初始化 LLM Provider
         provider_name = self._config.llm_provider.lower() if hasattr(self._config, 'llm_provider') else 'dashscope'
         api_key = self._config.dashscope_api_key if provider_name == 'dashscope' else None
@@ -168,11 +153,11 @@ class PRReviewer:
             logger.warning(f"Failed to initialize LLM provider: {e}")
             self._llm_provider = None
 
-        logger.info("PRReviewer initialized")
+        logger.info("PRReviewer initialized with OWASP security rules (%d rules)", len(PRReviewer._owasp_engine.SECURITY_RULES))
 
     def _detect_issues_by_rules(self, changes: List[CodeChange]) -> List[ReviewComment]:
         """
-        基于规则检测代码问题
+        基于规则检测代码问题（包括 OWASP 安全规则）
 
         Args:
             changes: 代码变更列表
@@ -185,6 +170,45 @@ class PRReviewer:
         for change in changes:
             code_content = "\n".join(change.changes)
 
+            # 1. OWASP 安全规则检测（50+ 条规则）
+            if PRReviewer._owasp_engine:
+                owasp_issues = PRReviewer._owasp_engine.detect_issues(change.file_path, code_content, change.hunk_start_line)
+                for owasp_issue in owasp_issues:
+                    # 映射 OWASP 严重程度到 PR 审查器
+                    severity_map = {
+                        OWASPIssueSeverity.CRITICAL: IssueSeverity.CRITICAL,
+                        OWASPIssueSeverity.HIGH: IssueSeverity.HIGH,
+                        OWASPIssueSeverity.MEDIUM: IssueSeverity.MEDIUM,
+                        OWASPIssueSeverity.LOW: IssueSeverity.LOW,
+                    }
+                    # 映射 OWASP 类别到 PR 审查器类别
+                    category_str = owasp_issue.category.value
+                    if "A03" in owasp_issue.owasp_id or "Injection" in category_str:
+                        pr_category = IssueCategory.SECURITY
+                    elif "A01" in owasp_issue.owasp_id or "Access" in category_str:
+                        pr_category = IssueCategory.SECURITY
+                    elif "A02" in owasp_issue.owasp_id or "Crypto" in category_str:
+                        pr_category = IssueCategory.SECURITY
+                    elif "A07" in owasp_issue.owasp_id or "Auth" in category_str:
+                        pr_category = IssueCategory.SECURITY
+                    elif "A08" in owasp_issue.owasp_id or "Integrity" in category_str:
+                        pr_category = IssueCategory.SECURITY
+                    elif "A10" in owasp_issue.owasp_id or "SSRF" in category_str:
+                        pr_category = IssueCategory.SECURITY
+                    else:
+                        pr_category = IssueCategory.SECURITY
+
+                    comment = ReviewComment(
+                        file_path=owasp_issue.file_path,
+                        line_number=owasp_issue.line_number,
+                        category=pr_category,
+                        severity=severity_map.get(owasp_issue.severity, IssueSeverity.MEDIUM),
+                        message=f"[{owasp_issue.owasp_id}] {owasp_issue.message}",
+                        suggestion=owasp_issue.suggestion,
+                    )
+                    issues.append(comment)
+
+            # 2. 通用代码质量检测规则
             for rule_name, rule_config in self.PATTERNS.items():
                 matches = re.finditer(rule_config["pattern"], code_content, re.IGNORECASE | re.MULTILINE)
 
@@ -203,7 +227,16 @@ class PRReviewer:
                     )
                     issues.append(comment)
 
-        return issues
+        # 去重（同一位置可能触发多条规则）
+        seen = set()
+        unique_issues = []
+        for issue in issues:
+            key = (issue.file_path, issue.line_number, issue.message)
+            if key not in seen:
+                seen.add(key)
+                unique_issues.append(issue)
+
+        return unique_issues
 
     async def _llm_review(
         self,
