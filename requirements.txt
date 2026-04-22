@@ -89,3 +89,6 @@ aiohttp>=3.9.0
 # CLI 增强 (可选依赖)
 rich>=13.0.0
 prompt_toolkit>=3.0.0
+
+# 微信续期脚本
+websockets>=12.0
