@@ -15,7 +15,7 @@ from agentscope.tool import Toolkit, ToolResponse
 
 from src.core.config_manager import ConfigManager
 from src.tools.github_tool import GitHubTool
-from src.mcp.github_mcp_client import create_github_mcp_client, register_github_mcp_tools
+from src.github_mcp import create_github_mcp_client, register_github_mcp_tools
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)

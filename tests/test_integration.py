@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.config_manager import ConfigManager
 from src.core.agentscope_persistent_memory import PersistentMemory, get_persistent_memory
-from src.mcp.github_mcp_client import GitHubMCPClient, create_github_mcp_client
-from src.mcp.github_mcp_mock import MockGitHubMCPClient, create_mcp_client
+from src.github_mcp.github_mcp_client import GitHubMCPClient, create_github_mcp_client
+from src.github_mcp.github_mcp_mock import MockGitHubMCPClient, create_mcp_client
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)

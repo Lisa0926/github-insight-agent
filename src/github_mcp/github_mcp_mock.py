@@ -319,5 +319,5 @@ def create_mcp_client(
         logger.warning("MCP Server binary not specified, using Mock client")
         return MockGitHubMCPClient(github_token)
 
-    from src.mcp.github_mcp_client import GitHubMCPClient
+    from src.github_mcp.github_mcp_client import GitHubMCPClient
     return GitHubMCPClient(github_token=github_token, bin_path=bin_path)
