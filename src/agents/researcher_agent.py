@@ -15,6 +15,8 @@ import json
 from typing import Any, Dict, List, Optional, Union
 import requests
 import os
+import re
+from datetime import datetime, timedelta
 
 from agentscope.message import Msg
 
@@ -269,6 +271,62 @@ class ResearcherAgent:
         return messages
 
     @trace(name="researcher.search_and_analyze")
+    def _parse_search_query(self, user_query: str) -> str:
+        """
+        将自然语言查询转换为 GitHub Search 语法
+
+        Args:
+            user_query: 用户自然语言查询
+
+        Returns:
+            GitHub Search 语法的查询字符串
+        """
+        query = user_query.strip()
+
+        # 检测时间范围关键词（按优先级排序，先匹配长的模式）
+        days = None
+
+        # 动态匹配：最近 N 天 / 近 N 天 / 过去 N 天
+        days_match = re.search(r"(?:最近 | 近|过去)\s*(\d+)\s*天", query)
+        if days_match:
+            days = int(days_match.group(1))
+        # 固定匹配
+        elif any(kw in query for kw in ["今天", "今日"]):
+            days = 0
+        elif "昨天" in query:
+            days = 1
+        elif any(kw in query for kw in ["本周", "最近一周"]):
+            days = 7
+        elif any(kw in query for kw in ["本月", "最近一月"]):
+            days = 30
+        # 检测"三天内"这种表达
+        elif "三天内" in query:
+            days = 3
+        elif "五天内" in query:
+            days = 5
+        elif "七天内" in query:
+            days = 7
+
+        # 如果检测到时间范围，添加 created 条件
+        if days is not None:
+            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            # 移除时间关键词，避免干扰搜索
+            time_keywords = [
+                "最近\\s*\\d+\\s*天", "近\\s*\\d+\\s*天", "过去\\s*\\d+\\s*天",
+                "今天", "今日", "昨天", "本周", "最近一周", "本月", "最近一月",
+                "三天内", "五天内", "七天内", "内"
+            ]
+            for kw in time_keywords:
+                query = re.sub(kw, "", query)
+            query = query.strip()
+            # 添加时间范围条件
+            query = f"created:{start_date}..{datetime.now().strftime('%Y-%m-%d')} {query}"
+
+        # 清理多余的空格
+        query = " ".join(query.split())
+
+        return query
+
     def search_and_analyze(
         self,
         query: str,
@@ -280,7 +338,7 @@ class ResearcherAgent:
         搜索并分析 GitHub 仓库
 
         Args:
-            query: 搜索关键词
+            query: 搜索关键词（自然语言或 GitHub Search 语法）
             sort: 排序字段
             order: 排序顺序
             per_page: 结果数量
@@ -288,11 +346,14 @@ class ResearcherAgent:
         Returns:
             搜索结果字典
         """
-        logger.info(f"Searching for: {query}")
+        # 将自然语言转换为 GitHub Search 语法
+        search_query = self._parse_search_query(query)
+        logger.info(f"Original query: {query}")
+        logger.info(f"Search query: {search_query}")
 
         try:
             repos = self.github_tool.search_repositories(
-                query=query,
+                query=search_query,
                 sort=sort,
                 order=order,
                 per_page=per_page,
@@ -301,6 +362,7 @@ class ResearcherAgent:
             # 格式化结果
             result = {
                 "query": query,
+                "search_query": search_query,
                 "total_found": len(repos),
                 "repositories": [
                     {
@@ -322,6 +384,7 @@ class ResearcherAgent:
             logger.error(f"Search failed: {e}")
             return {
                 "query": query,
+                "search_query": search_query,
                 "error": str(e),
                 "repositories": [],
             }
