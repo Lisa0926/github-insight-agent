@@ -66,3 +66,5 @@ node_modules/
 # 内部文档和报告（不上传）
 report/
 .hermes/
+**/.hermes/
+*hermes*
