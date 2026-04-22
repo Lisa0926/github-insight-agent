@@ -62,3 +62,7 @@ node_modules/
 
 # Git hooks (源文件在 .githooks/)
 .git/hooks/
+
+# 内部文档和报告（不上传）
+report/
+.hermes/
