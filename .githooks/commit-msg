@@ -1,48 +1,48 @@
 #!/bin/sh
-# Git commit-msg hook: 验证提交信息是否符合 Conventional Commits 规范
+# Git commit-msg hook: Validate commit message follows Conventional Commits format
 #
-# 安装方法:
+# Installation:
 #   cp .githooks/commit-msg .git/hooks/commit-msg
 #   chmod +x .git/hooks/commit-msg
 
 commit_msg=$(cat "$1")
 
-# 跳过合并提交和修正提交
+# Skip merge commits and revert commits
 if echo "$commit_msg" | grep -qE "^Merge|^Revert|^fixup!|^squash!"; then
     exit 0
 fi
 
-# 验证是否符合 Conventional Commits 规范
+# Validate Conventional Commits format
 if ! echo "$commit_msg" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|security|deprecate)(\([a-zA-Z0-9_-]+\))?: .+"; then
     echo ""
-    echo "❌ 提交信息不符合 Conventional Commits 规范"
+    echo "❌ Commit message does not follow Conventional Commits format"
     echo ""
-    echo "格式：<type>(<scope>): <description>"
+    echo "Format: <type>(<scope>): <description>"
     echo ""
-    echo "可用的 type:"
-    echo "  feat     - 新功能"
-    echo "  fix      - Bug 修复"
-    echo "  docs     - 文档更新"
-    echo "  style    - 代码格式（不影响功能）"
-    echo "  refactor - 重构"
-    echo "  perf     - 性能优化"
-    echo "  test     - 测试相关"
-    echo "  build    - 构建系统"
-    echo "  ci       - CI/CD"
-    echo "  chore    - 其他变更"
-    echo "  revert   - 回滚"
-    echo "  security - 安全修复"
-    echo "  deprecate - 弃用功能"
+    echo "Available types:"
+    echo "  feat       - New feature"
+    echo "  fix        - Bug fix"
+    echo "  docs       - Documentation changes"
+    echo "  style      - Code style (no functional changes)"
+    echo "  refactor   - Code refactoring"
+    echo "  perf       - Performance improvements"
+    echo "  test       - Test-related changes"
+    echo "  build      - Build system changes"
+    echo "  ci         - CI/CD changes"
+    echo "  chore      - Other changes"
+    echo "  revert     - Revert previous commits"
+    echo "  security   - Security fixes"
+    echo "  deprecate  - Deprecate features"
     echo ""
-    echo "示例:"
+    echo "Examples:"
     echo "  feat(llm): add OpenAI provider support"
     echo "  fix(mcp): resolve connection leak"
     echo "  docs: update README"
     echo ""
-    echo "详见：https://www.conventionalcommits.org/"
+    echo "See: https://www.conventionalcommits.org/"
     echo ""
     exit 1
 fi
 
-echo "✅ 提交信息格式正确"
+echo "✅ Commit message format valid"
 exit 0
