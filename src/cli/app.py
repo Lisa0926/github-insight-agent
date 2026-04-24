@@ -20,7 +20,7 @@ from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
 from src.core.config_manager import ConfigManager  # noqa: E402
-from src.core.report_generator import ReportGenerator  # noqa: E402
+from src.workflows.report_generator import ReportGenerator  # noqa: E402
 
 
 def print_welcome():
