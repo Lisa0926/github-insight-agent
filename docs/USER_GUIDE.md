@@ -1,6 +1,6 @@
 # GitHub Insight Agent - 用户使用手册
 
-**版本:** v1.0.0  
+**版本:** v1.1.0  
 **最后更新:** 2026-04-24
 
 ---
@@ -63,15 +63,37 @@ gia --interactive
 | PR 审查 | `/pr` | 审查 Pull Request 代码 |
 | 安全扫描 | `/scan <文件>` | OWASP 安全漏洞检测 |
 
+### 自然语言交互 (v1.1 新增)
+
+**无需记忆命令**，直接用自然语言描述需求：
+
+| 自然语言输入 | 等价命令 |
+|------------|---------|
+| `搜索 Python web 框架` | `/search Python web 框架` |
+| `分析 microsoft/TypeScript` | `/analyze microsoft/TypeScript` |
+| `找最近一周 star 最高的 3 个项目` | `/search` + 参数自动提取 |
+| `前 5 个最活跃的 AI 框架` | `/search` + 参数自动提取 |
+| `和第二个对比一下` | 追问（自动识别上下文） |
+
 ---
 
 ## 📋 使用示例
 
 ### 示例 1: 分析单个项目
 
+**命令方式:**
 ```bash
 $ gia /analyze microsoft/TypeScript
+```
 
+**自然语言方式:**
+```bash
+$ gia
+👤 您：分析 microsoft/TypeScript
+```
+
+**输出:**
+```
 📊 正在分析：microsoft/TypeScript
 ✅ 分析完成！
 
@@ -95,18 +117,25 @@ $ gia /analyze microsoft/TypeScript
 
 推荐意见:
 ⭐⭐⭐⭐⭐ 强烈推荐
-
-这是一个成熟的开源项目，代码质量高，
-文档完善，社区活跃。
 ```
 
 ---
 
 ### 示例 2: 搜索项目
 
+**命令方式:**
 ```bash
 $ gia /search "最近三天内 star 最高的 Python AI 项目前 3 个"
+```
 
+**自然语言方式:**
+```bash
+$ gia
+👤 您：为我搜索最近一周内 star 最高的 3 个 Python 项目
+```
+
+**输出:**
+```
 🔍 搜索：最近三天内 star 最高的 Python AI 项目前 3 个
 
 找到 3 个项目:
@@ -123,9 +152,19 @@ $ gia /search "最近三天内 star 最高的 Python AI 项目前 3 个"
 
 ### 示例 3: 生成详细报告
 
+**命令方式:**
 ```bash
 $ gia /report "Rust web framework"
+```
 
+**自然语言方式:**
+```bash
+$ gia
+👤 您：生成一份 Rust web framework 的详细报告
+```
+
+**输出:**
+```
 📄 正在生成详细报告...
 
 # Rust Web Framework 分析报告
@@ -135,25 +174,12 @@ $ gia /report "Rust web framework"
 **分析项目数**: 5
 
 ## 执行摘要
-
 本次分析对比了 5 个主流的 Rust Web 框架，
 其中 Axum 表现最佳...
 
-## 项目详情
-
-### 1. tokio-rs/axum
-- Stars: 15,234
-- 语言：Rust
-- 质量评分：4.8/5
-- 安全评分：4.9/5
-
-...
-
 ## 综合评估
-
 最佳选择：Axum
 次优选择：Actix-web
-新兴框架：Loki
 ```
 
 ---
@@ -183,11 +209,6 @@ index 1234567..abcdefg 100644
 - 问题：直接使用用户输入作为密码
 - 建议：使用 hash_password() 加密
 
-🟡 [中等] 代码风格
-- 文件：src/app.py, 第 15 行
-- 问题：函数过长 (45 行)
-- 建议：拆分为多个小函数
-
 ### 修复建议
 ```python
 # 修改前
@@ -195,7 +216,6 @@ password = request.args['password']
 
 # 修改后
 password = hash_password(request.args['password'])
-```
 ```
 
 ---
@@ -222,7 +242,79 @@ $ gia /scan src/handlers/auth.py
 ### 扫描统计
 - 扫描行数：234
 - 发现问题：3
-- 安全评级：⚠️ 需要改进
+- 安全评级：⚠️  需要改进
+```
+
+---
+
+### 示例 6: 自然语言多轮对话 (新增)
+
+```bash
+$ gia
+
+👤 您：搜索 Python AI 框架
+
+🔍 搜索：Python AI 框架
+找到 5 个项目:
+┌───┬──────────────────────────┬───────────┬─────────┬─────────────────┐
+│ # │ 项目                     │ Stars     │ 语言    │ 简介            │
+├───┼──────────────────────────┼───────────┼─────────┼─────────────────┤
+│ 1 │ huggingface/transformers │ ⭐ 90,123  │ Python  │ State-of-art.. │
+│ 2 │ langchain-ai/langchain   │ ⭐ 45,678  │ Python  │ Building apps.. │
+└───┴──────────────────────────┴───────────┴─────────┴─────────────────┘
+
+👤 您：分析第一个
+
+📊 正在分析：huggingface/transformers
+✅ 分析完成！
+核心功能：自然语言处理模型库
+技术栈：Python
+推荐意见：强烈推荐
+
+👤 您：和第二个对比一下
+
+🤖 Agent: transformers vs langchain 对比分析...
+1. 定位差异：transformers 专注模型推理，langchain 专注应用编排
+2. 社区规模：transformers 更大，langchain 增长更快
+3. 适用场景：...
+```
+
+---
+
+## 🎨 自然语言语法详解
+
+### 支持的查询模式
+
+| 类型 | 示例 | 识别结果 |
+|------|------|---------|
+| **数量** | `前 3 个 `、`5 个项目` | num_results=3 或 5 |
+| **排序** | `star 最高 `、`fork 最多 `、`最新` | sort=stars/forks/updated |
+| **时间** | `最近一周 `、` 过去 3 天`、`本月` | time_range=对应日期范围 |
+| **项目名** | `microsoft/TypeScript` | 自动识别为 analyze |
+
+### 意图识别规则
+
+| 输入特征 | 识别为 | 执行动作 |
+|---------|-------|---------|
+| 包含 `owner/repo` 格式 | 分析 | `/analyze` |
+| 包含 `搜索`、`找`、`推荐` | 搜索 | `/search` |
+| 包含 `报告`、` 深度分析` | 报告 | `/report` |
+| 简短追问（有上下文） | 追问 | 多轮对话 |
+
+### 高级示例
+
+```bash
+# 组合查询
+👤 您：最近 7 天内 star 最高的 5 个 Python 机器学习项目
+   → 搜索：Python 机器学习，时间=7 天，排序=stars，数量=5
+
+# 模糊查询
+👤 您：找一些 Rust web 框架
+   → 搜索：Rust web framework
+
+# 对比追问
+👤 您：第一个和第三个哪个更好？
+   → 基于上下文的对比分析
 ```
 
 ---
