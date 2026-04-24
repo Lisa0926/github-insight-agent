@@ -38,15 +38,47 @@ GITHUB_TOKEN=ghp_xxx
 
 ### 3. 运行
 
+#### 方式 A: 使用虚拟环境（推荐）
+
 ```bash
-# 方式 1: 直接运行
+# 1. 创建虚拟环境
+python3 -m venv venv
+
+# 2. 激活虚拟环境
+source venv/bin/activate
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 运行
+python run_cli.py
+```
+
+#### 方式 B: 直接运行
+
+```bash
+# 方式 1: 使用 CLI 启动脚本
+python run_cli.py
+
+# 方式 2: 直接运行 main.py
 python main.py
+```
 
-# 方式 2: 使用 CLI
+#### 方式 C: 安装为全局命令（可选）
+
+```bash
+# 安装项目
+pip install -e .
+
+# 之后可在任何目录运行
 gia
+```
 
-# 方式 3: 交互模式
-gia --interactive
+**注意:** 如果使用虚拟环境，每次使用前需要先激活：
+```bash
+cd /path/to/github-insight-agent
+source venv/bin/activate
+gia
 ```
 
 ---
@@ -249,8 +281,21 @@ $ gia /scan src/handlers/auth.py
 
 ### 示例 6: 自然语言多轮对话 (新增)
 
+**使用虚拟环境:**
 ```bash
-$ gia
+# 1. 激活虚拟环境
+source venv/bin/activate
+
+# 2. 启动 GIA
+python run_cli.py
+
+# 或直接运行
+python run_cli.py
+```
+
+**交互示例:**
+```bash
+$ python run_cli.py
 
 👤 您：搜索 Python AI 框架
 
