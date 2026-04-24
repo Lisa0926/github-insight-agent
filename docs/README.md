@@ -66,7 +66,7 @@
 
 | 资源 | 路径 |
 |------|------|
-| 配置文件 | `/home/lisa/.env` |
+| 配置文件 | `~/.env` |
 | 任务历史 | `.hermes/tasks/{project}/INDEX.md` |
 | 数据库 | `data/app.db` |
 | 日志 | `logs/` |

@@ -127,7 +127,7 @@ github-insight-agent/
    - 微信/飞书 ID
 
 ✅ 统一存储位置:
-   /home/lisa/.env
+   `~/.env`
 ```
 
 ### OWASP Top 10 检测
@@ -147,14 +147,12 @@ github-insight-agent/
 
 ## ⏰ 定时任务配置
 
-| 任务 ID | 项目 | 时间 | 内容 |
-|--------|------|------|------|
-| `0b1e416f96a2` | GIA | 21:00 | Part 1 技术迭代 |
-| `0e26789d8973` | GIA | 21:00 | Part 2 产品迭代 |
-| `8ed22971fd35` | Resume | 02:00 | Part 1 + Part 2 |
-| `65c080f606d5` | Wealth-Ops | 23:00 | Part 1 + Part 2 |
+| 任务 ID | 时间 | 内容 |
+|--------|------|------|
+| Part 1: 技术迭代 | 每日 21:00 | 架构审查、安全修复、测试补充 |
+| Part 2: 产品迭代 | 每日 21:00 | 竞品分析、待办列表、迭代计划 |
 
-**输出位置:** `/home/lisa/.hermes/tasks/{project}/mission-log/`
+**输出位置:** `~/.hermes/tasks/github-insight-agent/mission-log/`
 
 ---
 

@@ -24,7 +24,7 @@ pip install -r requirements.txt
 # 复制环境变量模板
 cp .env.sample .env
 
-# 编辑 .env 文件 (或使用全局配置 /home/lisa/.env)
+# 编辑 .env 文件 (或使用全局配置 ~/.env)
 ```
 
 **必需配置:**
@@ -321,10 +321,10 @@ config.set_provider("openai")
 **解决方案:**
 ```bash
 # 检查全局配置
-cat /home/lisa/.env | grep DASHSCOPE
+cat ~/.env | grep DASHSCOPE
 
 # 重新配置
-echo "DASHSCOPE_API_KEY=sk-xxx" >> /home/lisa/.env
+echo "DASHSCOPE_API_KEY=sk-xxx" >> ~/.env
 ```
 
 ---
@@ -412,7 +412,7 @@ info = tool.get_repo_info("owner", "repo")
 
 ## 📝 最佳实践
 
-1. **使用全局配置**: 将 API Keys 放在 `/home/lisa/.env`
+1. **使用全局配置**: 将 API Keys 放在 `~/.env`
 2. **定期清理缓存**: `rm -rf data/*.db logs/*.log`
 3. **查看执行历史**: `cat .hermes/tasks/github-insight-agent/INDEX.md`
 4. **监控 CI 状态**: 关注 GitHub Actions 邮件通知

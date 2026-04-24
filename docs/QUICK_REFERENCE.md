@@ -51,7 +51,7 @@ github-insight-agent/
 
 | 配置项 | 位置 |
 |--------|------|
-| API Keys | `/home/lisa/.env` |
+| API Keys | `~/.env` |
 | 模型配置 | `configs/model_configs.json` |
 | 任务历史 | `.hermes/tasks/{project}/INDEX.md` |
 | 日志 | `logs/` |
@@ -74,7 +74,7 @@ github-insight-agent/
 
 | 问题 | 解决方案 |
 |------|----------|
-| API Key 错误 | 检查 `/home/lisa/.env` |
+| API Key 错误 | 检查 `~/.env` |
 | GitHub 限流 | 配置 Token 或等待 1h |
 | SQLite 锁定 | `rm data/app.db` |
 | CI 失败 | 查看 GitHub Actions 日志 |
@@ -134,4 +134,4 @@ GIA 项目每日自动执行：
 
 ---
 
-**完整版文档:** `/home/lisa/claude_apps/github-insight-agent/docs/`
+**完整版文档:** `<项目根目录>/docs/`

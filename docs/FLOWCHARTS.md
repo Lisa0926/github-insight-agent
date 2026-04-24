@@ -12,7 +12,7 @@ flowchart TD
     B --> C{检查配置文件}
     C -->|存在 | D[加载 configs/model_configs.json]
     C -->|不存在 | E[创建默认配置]
-    D --> F[加载环境变量 /home/lisa/.env]
+    D --> F[加载环境变量 ~/.env]
     E --> F
     F --> G{验证 API Key}
     G -->|有效 | H[初始化 ResearcherAgent]
@@ -206,7 +206,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[ConfigManager 初始化] --> B[加载全局 /home/lisa/.env]
+    A[ConfigManager 初始化] --> B[加载全局 ~/.env]
     B --> C{文件存在？}
     
     C -->|是 | D[加载 DASHSCOPE_API_KEY]

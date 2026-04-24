@@ -301,7 +301,7 @@ src/types/
 ### 3.1 环境变量 (.env)
 
 ```bash
-# 全局配置：/home/lisa/.env
+# 全局配置：~/.env
 
 # 模型服务 API Key
 DASHSCOPE_API_KEY=sk-xxx
@@ -383,7 +383,7 @@ FEISHU_GROUP_ID=xxx
 
 ```
 ┌─────────────────┐
-│  /home/lisa/.env│  ← 敏感信息集中存储
+│     ~/.env      │  ← 敏感信息集中存储
 └────────┬────────┘
          │
          ▼
