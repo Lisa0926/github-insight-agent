@@ -5,7 +5,13 @@ Git Pre-commit Hook - 安全扫描
 
 功能:
 - 检测暂存区 (staged) 文件中的硬编码敏感信息
+- 检测本地用户路径暴露 (Linux/macOS/Windows)
+- 检测文档文件中的绝对路径
 - 阻止提交包含 token、API key、channel ID 等的代码
+
+扫描范围:
+- 代码文件：.py, .js, .ts, .json, .yaml, .yml
+- 文档文件：.md, .rst, .txt (额外检查路径暴露)
 
 安装:
     cp .githooks/pre-commit-security .git/hooks/pre-commit
@@ -14,6 +20,7 @@ Git Pre-commit Hook - 安全扫描
 注意:
 - 此 hook 仅扫描 staged 的文件
 - 如果发现敏感信息，提交将被阻止
+- ~/.env 是允许的正确形式
 """
 
 import subprocess
@@ -48,7 +55,39 @@ SCAN_PATTERNS = {
         "message": "Feishu Channel ID",
         "severity": "MEDIUM"
     },
+    "local_path_home": {
+        "pattern": r"/home/[a-zA-Z0-9_-]+/",
+        "message": "本地用户路径 (可能暴露用户名)",
+        "severity": "MEDIUM"
+    },
+    "local_path_absOLUTE": {
+        "pattern": r"/Users/[a-zA-Z0-9_-]+/",
+        "message": "macOS 本地用户路径",
+        "severity": "MEDIUM"
+    },
+    "local_path_windows": {
+        "pattern": r"C:\\\\Users\\\\[a-zA-Z0-9_-]+\\\\",
+        "message": "Windows 本地用户路径",
+        "severity": "MEDIUM"
+    },
 }
+
+# 文档文件中额外检查的模式
+DOC_SCAN_PATTERNS = {
+    "env_file_path": {
+        "pattern": r"[a-zA-Z0-9/_-]+/\.env(?!\"\)|\')|~?/?[a-zA-Z0-9_-]+/\.env",
+        "message": ".env 文件路径暴露 (应使用 ~/.env)",
+        "severity": "MEDIUM"
+    },
+    "project_path_exposure": {
+        "pattern": r"/home/[a-zA-Z0-9_-]+/[a-zA-Z0-9_/-]+/github-insight-agent",
+        "message": "项目绝对路径暴露",
+        "severity": "MEDIUM"
+    },
+}
+
+# 文档文件扩展名
+DOC_EXTENSIONS = (".md", ".rst", ".txt", ".rst")
 
 # 允许的占位符模式
 ALLOWED_PLACEHOLDERS = {
@@ -78,6 +117,9 @@ def scan_file_content(content: str, file_path: str) -> list:
     import re
     findings = []
 
+    # 判断是否为文档文件
+    is_doc_file = file_path.endswith(DOC_EXTENSIONS)
+
     for line_num, line in enumerate(content.split("\n"), 1):
         # 跳过注释
         stripped = line.strip()
@@ -94,6 +136,9 @@ def scan_file_content(content: str, file_path: str) -> list:
 
         for pattern_name, config in SCAN_PATTERNS.items():
             if re.search(config["pattern"], line, re.IGNORECASE):
+                # 对于本地路径，允许 ~/.env 这种形式
+                if pattern_name == "local_path_home" and "~/.env" in line:
+                    continue
                 findings.append({
                     "file": file_path,
                     "line": line_num,
@@ -102,6 +147,22 @@ def scan_file_content(content: str, file_path: str) -> list:
                     "severity": config["severity"],
                     "content": line.strip()[:80]
                 })
+
+        # 文档文件额外检查
+        if is_doc_file:
+            for pattern_name, config in DOC_SCAN_PATTERNS.items():
+                if re.search(config["pattern"], line, re.IGNORECASE):
+                    # 允许 ~/.env 这种正确形式
+                    if "~/.env" in line and pattern_name == "env_file_path":
+                        continue
+                    findings.append({
+                        "file": file_path,
+                        "line": line_num,
+                        "pattern": pattern_name,
+                        "message": config["message"],
+                        "severity": config["severity"],
+                        "content": line.strip()[:80]
+                    })
 
     return findings
 
@@ -125,10 +186,6 @@ def main():
     all_findings = []
 
     for file_path in staged_files:
-        # 跳过非代码文件
-        if not file_path.endswith((".py", ".js", ".ts", ".json", ".yaml", ".yml")):
-            continue
-
         # 跳过排除的目录
         if any(exclude in file_path for exclude in ["node_modules", "venv", ".env", "__pycache__"]):
             continue
@@ -171,9 +228,12 @@ def main():
     print("  1. 使用环境变量代替硬编码值")
     print("     例如：os.getenv('GITHUB_TOKEN')")
     print()
-    print("  2. 将敏感信息添加到 /home/lisa/.env 文件")
+    print("  2. 将敏感信息添加到 ~/.env 文件 (不要使用绝对路径)")
     print()
     print("  3. 如果只是测试占位符，使用: YOUR_TOKEN_HERE")
+    print("  4. 文档中使用 ~/ 或 <项目根目录> 代替绝对路径")
+    print("     错误：/home/user/project")
+    print("     正确：~/.env 或 <项目根目录>/configs/")
     print()
     print("=" * 60)
 
