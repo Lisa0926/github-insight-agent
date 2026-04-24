@@ -18,6 +18,7 @@ sys.path.insert(0, str(project_root))
 
 from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
+from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
 from src.core.config_manager import ConfigManager  # noqa: E402
 from src.core.report_generator import ReportGenerator  # noqa: E402
 
@@ -39,6 +40,15 @@ def print_welcome():
         "/quit": "退出程序",
     }
     renderer.print_help(commands)
+
+    # 自然语言提示
+    renderer.print_info(
+        "💡 支持自然语言输入，例如：\n"
+        "  • '为我搜索最近一周内 star 最高的 3 个 Python 项目'\n"
+        "  • '分析 microsoft/TypeScript'\n"
+        "  • '找一些 Rust web framework'\n"
+        "  • '前 5 个最活跃的 AI 框架'"
+    )
 
 
 def check_environment():
@@ -65,6 +75,7 @@ def run_interactive_mode():  # noqa: C901
     from src.agents.analyst_agent import set_studio_config as set_analyst_studio
 
     config = ConfigManager()
+    nl_parser = NaturalLanguageParser()
 
     # 设置 Studio 配置
     if config.agentscope_enable_studio:
@@ -207,17 +218,92 @@ def run_interactive_mode():  # noqa: C901
                     renderer.print_error(f"未知命令：{command}", "输入 /help 查看可用命令")
 
             else:
-                # 普通对话
-                if not report_gen._current_projects:
-                    renderer.print_warning(
-                        "请先使用 /search 或 /analyze 命令，然后再追问问题"
-                    )
-                    continue
+                # 自然语言输入 - 智能识别意图
+                has_context = bool(report_gen._current_projects)
+                parsed = nl_parser.parse(user_input, has_context=has_context)
 
-                with renderer.create_progress("Agent 思考中..."):
-                    response = report_gen.handle_followup(user_input)
+                if parsed.intent == IntentType.FOLLOWUP and has_context:
+                    # 追问模式
+                    with renderer.create_progress("Agent 思考中..."):
+                        response = report_gen.handle_followup(user_input)
+                    renderer.print_panel("🤖 Agent", response, style="cyan")
 
-                renderer.print_panel("🤖 Agent", response, style="cyan")
+                elif parsed.intent == IntentType.ANALYZE:
+                    # 分析单个项目
+                    query_parts = parsed.query.split("/")
+                    if len(query_parts) == 2:
+                        owner, repo = query_parts
+                        with renderer.create_progress(f"分析项目：{owner}/{repo}"):
+                            result = report_gen.analyst.analyze_project(owner, repo)
+
+                        if result.get("error"):
+                            renderer.print_error("分析失败", result["error"])
+                        else:
+                            analysis = result.get("analysis", {})
+                            renderer.print_panel(
+                                "📊 分析结果",
+                                f"核心功能：{analysis.get('core_function', 'N/A')}\n"
+                                f"技术栈：{analysis.get('tech_stack', {}).get('language', 'N/A')}\n"
+                                f"推荐意见：{analysis.get('recommendation', 'N/A')}",
+                                style="green"
+                            )
+                    else:
+                        renderer.print_warning("无法识别项目名，请使用 owner/repo 格式")
+
+                elif parsed.intent == IntentType.SEARCH:
+                    # 搜索项目
+                    query = parsed.query
+                    time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
+                    with renderer.create_progress(f"搜索：{query}{time_desc}"):
+                        search_result = report_gen.researcher.search_and_analyze(
+                            query=query,
+                            sort=parsed.sort_by,
+                            per_page=parsed.num_results,
+                        )
+
+                    repos = search_result.get("repositories", [])
+                    if repos:
+                        renderer.print_info(f"找到 {len(repos)} 个项目")
+                        rows = []
+                        for i, repo in enumerate(repos[:parsed.num_results], 1):
+                            rows.append([
+                                str(i),
+                                repo["full_name"],
+                                f"⭐ {repo['stars']:,}",
+                                repo.get("language", ""),
+                            ])
+                        renderer.print_table("搜索结果", ["#", "项目", "Stars", "语言"], rows)
+                    else:
+                        renderer.print_warning("未找到相关项目")
+
+                elif parsed.intent == IntentType.REPORT:
+                    # 生成详细报告
+                    query = parsed.query
+                    with renderer.create_progress(f"生成报告：{query}"):
+                        report = report_gen.execute(
+                            query=query,
+                            num_projects=parsed.num_results,
+                            sort=parsed.sort_by,
+                        )
+                    renderer.print_success("报告生成完成！")
+                    # 显示报告摘要
+                    renderer.print_panel("📄 报告摘要", report[:500] + "..." if len(report) > 500 else report)
+
+                else:
+                    # 未知意图，尝试当作搜索处理
+                    with renderer.create_progress(f"搜索：{user_input}"):
+                        search_result = report_gen.researcher.search_and_analyze(
+                            query=user_input,
+                            sort="stars",
+                            per_page=5,
+                        )
+
+                    repos = search_result.get("repositories", [])
+                    if repos:
+                        renderer.print_info(f"找到 {len(repos)} 个项目")
+                        renderer.print_panel("💡 提示", "使用 '分析第一个' 或 '对比前 3 个' 继续交互")
+                    else:
+                        renderer.print_warning("未找到相关项目，请尝试其他关键词")
 
         except KeyboardInterrupt:
             print("\n")

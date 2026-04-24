@@ -67,3 +67,5 @@ node_modules/
 .hermes/tasks/
 .hermes/ci_results.md
 .hermes/mission-results/
+.hermes/mission-log
+.hermes/MISSION_INDEX.md
