@@ -85,6 +85,7 @@ yarl==1.23.0
 zipp==3.23.0
 tenacity>=8.2.0
 aiohttp>=3.9.0
+fastapi>=0.100.0
 
 # CLI 增强 (可选依赖)
 rich>=13.0.0
