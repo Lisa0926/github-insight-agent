@@ -1,0 +1,422 @@
+# GitHub Insight Agent - 用户使用手册
+
+**版本:** v1.0.0  
+**最后更新:** 2026-04-24
+
+---
+
+## 📖 快速开始
+
+### 1. 安装
+
+```bash
+# 克隆项目
+git clone https://github.com/Lisa0926/github-insight-agent.git
+cd github-insight-agent
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+### 2. 配置
+
+```bash
+# 复制环境变量模板
+cp .env.sample .env
+
+# 编辑 .env 文件 (或使用全局配置 /home/lisa/.env)
+```
+
+**必需配置:**
+```bash
+# 阿里云百炼 API Key
+DASHSCOPE_API_KEY=sk-xxx
+
+# GitHub Personal Access Token
+GITHUB_TOKEN=ghp_xxx
+```
+
+### 3. 运行
+
+```bash
+# 方式 1: 直接运行
+python main.py
+
+# 方式 2: 使用 CLI
+gia
+
+# 方式 3: 交互模式
+gia --interactive
+```
+
+---
+
+## 🎯 功能特性
+
+### 核心功能
+
+| 功能 | 命令 | 描述 |
+|------|------|------|
+| 项目分析 | `/analyze owner/repo` | 分析单个 GitHub 项目 |
+| 项目搜索 | `/search <关键词>` | 搜索相关项目 |
+| 详细报告 | `/report <关键词>` | 生成深度分析报告 |
+| PR 审查 | `/pr` | 审查 Pull Request 代码 |
+| 安全扫描 | `/scan <文件>` | OWASP 安全漏洞检测 |
+
+---
+
+## 📋 使用示例
+
+### 示例 1: 分析单个项目
+
+```bash
+$ gia /analyze microsoft/TypeScript
+
+📊 正在分析：microsoft/TypeScript
+✅ 分析完成！
+
+项目概览:
+┌─────────────────────────────────────┐
+│ 名称：microsoft/TypeScript          │
+│ Stars: 98,234                       │
+│ 语言：TypeScript                    │
+│ 简介：TypeScript is a superset...   │
+└─────────────────────────────────────┘
+
+技术栈分析:
+- 主要语言：TypeScript (92.3%)
+- 构建工具：npm, Makefile
+- 测试框架：Jest
+
+质量评分：
+- 代码质量：★★★★☆ (4.2/5)
+- 安全性：★★★★★ (4.8/5)
+- 文档完整度：★★★★★ (5.0/5)
+
+推荐意见:
+⭐⭐⭐⭐⭐ 强烈推荐
+
+这是一个成熟的开源项目，代码质量高，
+文档完善，社区活跃。
+```
+
+---
+
+### 示例 2: 搜索项目
+
+```bash
+$ gia /search "最近三天内 star 最高的 Python AI 项目前 3 个"
+
+🔍 搜索：最近三天内 star 最高的 Python AI 项目前 3 个
+
+找到 3 个项目:
+┌───┬──────────────────────────┬───────────┬─────────┬─────────────────┐
+│ # │ 项目                     │ Stars     │ 语言    │ 简介            │
+├───┼──────────────────────────┼───────────┼─────────┼─────────────────┤
+│ 1 │ openai/whisper           │ ⭐ 15,234  │ Python  │ Robust Speech.. │
+│ 2 │ huggingface/transformers │ ⭐ 12,456  │ Python  │ State-of-art..  │
+│ 3 │ antora/claude-code       │ ⭐ 8,901   │ Python  │ AI assistant... │
+└───┴──────────────────────────┴───────────┴─────────┴─────────────────┘
+```
+
+---
+
+### 示例 3: 生成详细报告
+
+```bash
+$ gia /report "Rust web framework"
+
+📄 正在生成详细报告...
+
+# Rust Web Framework 分析报告
+
+**生成时间**: 2026-04-24 15:30
+**搜索关键词**: Rust web framework
+**分析项目数**: 5
+
+## 执行摘要
+
+本次分析对比了 5 个主流的 Rust Web 框架，
+其中 Axum 表现最佳...
+
+## 项目详情
+
+### 1. tokio-rs/axum
+- Stars: 15,234
+- 语言：Rust
+- 质量评分：4.8/5
+- 安全评分：4.9/5
+
+...
+
+## 综合评估
+
+最佳选择：Axum
+次优选择：Actix-web
+新兴框架：Loki
+```
+
+---
+
+### 示例 4: PR 审查
+
+```bash
+$ gia /pr
+# 粘贴 git diff 内容
+
+diff --git a/src/app.py b/src/app.py
+index 1234567..abcdefg 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,7 +10,7 @@ def login(request):
+-    password = request.args['password']
++    password = hash_password(request.args['password'])
+
+🔍 正在审查代码变更...
+
+## PR 审查报告
+
+### 发现的问题
+
+🔴 [严重] A03 注入风险
+- 文件：src/app.py, 第 12 行
+- 问题：直接使用用户输入作为密码
+- 建议：使用 hash_password() 加密
+
+🟡 [中等] 代码风格
+- 文件：src/app.py, 第 15 行
+- 问题：函数过长 (45 行)
+- 建议：拆分为多个小函数
+
+### 修复建议
+```python
+# 修改前
+password = request.args['password']
+
+# 修改后
+password = hash_password(request.args['password'])
+```
+```
+
+---
+
+### 示例 5: 安全扫描
+
+```bash
+$ gia /scan src/handlers/auth.py
+
+🔒 正在扫描：src/handlers/auth.py
+
+## 安全扫描报告
+
+### 发现的问题
+
+🔴 [严重] A02 加密失败
+- 第 23 行：使用 MD5 哈希密码
+- 建议：使用 bcrypt 或 argon2
+
+🟠 [高危] A07 认证缺陷
+- 第 45 行：缺少会话超时机制
+- 建议：添加会话过期时间
+
+### 扫描统计
+- 扫描行数：234
+- 发现问题：3
+- 安全评级：⚠️ 需要改进
+```
+
+---
+
+## 🔧 高级用法
+
+### 1. 自然语言查询
+
+支持中文自然语言，无需学习复杂语法：
+
+```bash
+# 时间范围
+"最近 7 天内 star 最高的项目"
+"过去一个月最活跃的 Python 项目"
+"本周新创建的 Rust 项目"
+
+# 数量限制
+"前 5 个项目"
+"排名前 10 的 AI 工具"
+
+# 排序偏好
+"按 fork 数排序"
+"按更新时间排序"
+"star 最多的"
+```
+
+---
+
+### 2. 多轮对话
+
+支持追问和上下文理解：
+
+```bash
+用户：搜索 Python Web 框架
+助手：找到 10 个相关项目...
+
+用户：分析第一个
+助手：正在分析 Flask...
+
+用户：和第二个对比一下
+助手：Flask vs Django 对比分析...
+```
+
+---
+
+### 3. 自定义配置
+
+```python
+# 在项目中使用
+from src.core.config_manager import ConfigManager
+
+config = ConfigManager()
+
+# 获取模型配置
+model_config = config.get_model_config("qwen-max")
+
+# 切换 LLM 提供商
+config.set_provider("openai")
+```
+
+---
+
+## 📊 输出格式
+
+### CLI 输出
+
+- ✅ 成功消息 - 绿色
+- ⚠️ 警告消息 - 黄色
+- ❌ 错误消息 - 红色
+- 📊 数据表格 - 边框美化
+
+### 微信推送
+
+```
+📊 GitHub Insight Agent - 任务执行报告
+
+✅ Part 1: 测试任务 - 4/4 通过
+✅ Part 2: 产品报告 - 已完成
+
+详细报告：
+📁 .hermes/mission-results/mission-20260424-210000.md
+
+祝您今天心情美美的～💖
+```
+
+---
+
+## 🛠️ 故障排除
+
+### 问题 1: API Key 错误
+
+```
+错误：DASHSCOPE_API_KEY 未配置
+```
+
+**解决方案:**
+```bash
+# 检查全局配置
+cat /home/lisa/.env | grep DASHSCOPE
+
+# 重新配置
+echo "DASHSCOPE_API_KEY=sk-xxx" >> /home/lisa/.env
+```
+
+---
+
+### 问题 2: GitHub API 限流
+
+```
+错误：API rate limit exceeded
+```
+
+**解决方案:**
+1. 配置 GitHub Token
+2. 等待 1 小时自动重置
+3. 使用企业账号提高限额
+
+---
+
+### 问题 3: SQLite 锁竞争
+
+```
+错误：database is locked
+```
+
+**解决方案:**
+```bash
+# 清理锁定的数据库
+rm data/app.db
+# 重启应用
+gia
+```
+
+---
+
+## 📚 API 参考
+
+### ReportGenerator
+
+```python
+from src.workflows.report_generator import ReportGenerator
+
+generator = ReportGenerator()
+
+# 搜索并分析
+result = generator.researcher.search_and_analyze(
+    query="python web framework",
+    sort="stars",
+    per_page=5
+)
+
+# 深度分析
+analysis = generator.analyst.analyze_project(
+    owner="tokio-rs",
+    repo="axum"
+)
+
+# 生成报告
+report = generator.generate_report(result, analysis)
+```
+
+---
+
+### GitHubTool
+
+```python
+from src.tools.github_tool import GitHubTool
+
+tool = GitHubTool()
+
+# 搜索仓库
+repos = tool.search_repositories(
+    query="python",
+    sort="stars",
+    order="desc",
+    per_page=10
+)
+
+# 获取 README
+readme = tool.get_readme("owner", "repo")
+
+# 获取仓库信息
+info = tool.get_repo_info("owner", "repo")
+```
+
+---
+
+## 📝 最佳实践
+
+1. **使用全局配置**: 将 API Keys 放在 `/home/lisa/.env`
+2. **定期清理缓存**: `rm -rf data/*.db logs/*.log`
+3. **查看执行历史**: `cat .hermes/tasks/github-insight-agent/INDEX.md`
+4. **监控 CI 状态**: 关注 GitHub Actions 邮件通知
+
+---
+
+*更多示例请访问：https://github.com/Lisa0926/github-insight-agent*
