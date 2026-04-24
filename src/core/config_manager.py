@@ -71,10 +71,8 @@ class ConfigManager:
                 # Log warning if project .env exists but is not explicitly allowed
                 pass  # Silently skip - project .env should not be used
         else:
-            # 尝试加载 .env.example 作为备选
-            env_example_path = Path(__file__).parent.parent.parent / ".env.example"
-            if env_example_path.exists():
-                load_dotenv(env_example_path, override=True)
+            # 不要加载 .env.example - 它仅作为配置模板参考，不包含有效配置
+            pass  # Silently skip - .env.example is a template, not a config file
 
     def _load_model_configs(self) -> None:
         """从 JSON 文件加载模型配置"""

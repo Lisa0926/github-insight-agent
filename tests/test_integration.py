@@ -13,7 +13,6 @@ GitHub Insight Agent - 集成测试脚本
 
 import os
 import sys
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -21,9 +20,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.config_manager import ConfigManager
-from src.core.agentscope_persistent_memory import PersistentMemory, get_persistent_memory
-from src.github_mcp.github_mcp_client import GitHubMCPClient, create_github_mcp_client
-from src.github_mcp.github_mcp_mock import MockGitHubMCPClient, create_mcp_client
+from src.core.agentscope_persistent_memory import PersistentMemory, get_persistent_memory  # noqa: F401
+from src.github_mcp.github_mcp_client import GitHubMCPClient, create_github_mcp_client  # noqa: F401
+from src.github_mcp.github_mcp_mock import MockGitHubMCPClient, create_mcp_client  # noqa: F401
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -177,7 +176,7 @@ def test_database_persistence():
 # ===========================================
 # 测试 3: GitHub MCP Server 连接测试
 # ===========================================
-def test_github_mcp_connection():
+def test_github_mcp_connection():  # noqa: C901
     """测试 GitHub MCP Server 连接"""
     print("\n" + "="*60)
     print("测试 3: GitHub MCP Server 连接测试")
@@ -268,7 +267,8 @@ def test_github_mcp_connection():
 
         # 尝试调用一个简单工具（获取当前用户信息）
         print("\n  尝试调用 GitHub API 测试...")
-        async def test_tool_call():
+
+        async def test_tool_call():  # noqa: E306
             # 使用 search_repositories 工具测试
             try:
                 result = await client.call_tool(
@@ -313,7 +313,7 @@ def test_github_mcp_connection():
 # ===========================================
 # 测试 4: 端到端集成测试
 # ===========================================
-def test_end_to_end():
+def test_end_to_end():  # noqa: C901
     """端到端集成测试"""
     print("\n" + "="*60)
     print("测试 4: 端到端集成测试")

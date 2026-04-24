@@ -22,7 +22,7 @@ A10: Server-Side Request Forgery (SSRF)
 
 import re
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 from src.core.logger import get_logger

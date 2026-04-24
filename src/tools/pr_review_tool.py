@@ -16,6 +16,7 @@ PR 自动审查工具
 """
 
 import re
+import json
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,7 +25,7 @@ from src.core.logger import get_logger
 from src.core.config_manager import ConfigManager
 from src.llm.provider_factory import get_provider
 from src.types.schemas import ToolResponse
-from src.tools.owasp_security_rules import OWASPRuleEngine, IssueSeverity as OWASPIssueSeverity, IssueCategory as OWASPIssueCategory
+from src.tools.owasp_security_rules import OWASPRuleEngine, IssueSeverity as OWASPIssueSeverity
 
 logger = get_logger(__name__)
 
@@ -153,9 +154,10 @@ class PRReviewer:
             logger.warning(f"Failed to initialize LLM provider: {e}")
             self._llm_provider = None
 
-        logger.info("PRReviewer initialized with OWASP security rules (%d rules)", len(PRReviewer._owasp_engine.SECURITY_RULES))
+        rules_count = len(PRReviewer._owasp_engine.SECURITY_RULES)
+        logger.info("PRReviewer initialized with OWASP security rules (%d rules)", rules_count)
 
-    def _detect_issues_by_rules(self, changes: List[CodeChange]) -> List[ReviewComment]:
+    def _detect_issues_by_rules(self, changes: List[CodeChange]) -> List[ReviewComment]:  # noqa: C901
         """
         基于规则检测代码问题（包括 OWASP 安全规则）
 
@@ -389,13 +391,7 @@ approval_recommendation 可选值:
             "issues_found": len(rule_issues),
         }
 
-        # 按严重程度分组问题
-        issues_by_severity = {
-            "critical": [i for i in rule_issues if i.severity == IssueSeverity.CRITICAL],
-            "high": [i for i in rule_issues if i.severity == IssueSeverity.HIGH],
-            "medium": [i for i in rule_issues if i.severity == IssueSeverity.MEDIUM],
-            "low": [i for i in rule_issues if i.severity == IssueSeverity.LOW],
-        }
+        # Stats already computed above; rule_issues available directly in report
 
         report = {
             "pr_title": pr_title,
@@ -488,7 +484,7 @@ async def review_pull_request(
         return ToolResponse.fail(error_message=str(e))
 
 
-def _parse_diff(diff_content: str) -> List[CodeChange]:
+def _parse_diff(diff_content: str) -> List[CodeChange]:  # noqa: C901
     """
     解析 git diff 内容为 CodeChange 列表
 
@@ -544,7 +540,7 @@ def _parse_diff(diff_content: str) -> List[CodeChange]:
     return changes
 
 
-def _format_report(report: Dict[str, Any]) -> str:
+def _format_report(report: Dict[str, Any]) -> str:  # noqa: C901
     """格式化审查报告为人类可读文本"""
     lines = [
         "=" * 60,

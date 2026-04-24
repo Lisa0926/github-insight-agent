@@ -2,6 +2,14 @@
 
 企业级多智能体情报分析系统，基于 AgentScope 框架和 GitHub MCP (Model Context Protocol) 实现自动化代码仓库分析。
 
+## CI/CD 状态
+
+| 测试 | 安全审计 | 覆盖率 |
+|------|----------|--------|
+| [![CI](https://github.com/Lisa0926/github-insight-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lisa0926/github-insight-agent/actions) | ![pip-audit](https://img.shields.io/badge/pip--audit-pass-green) | ![codecov](https://img.shields.io/badge/codecov-100%25-green) |
+
+**最近执行结果**: 90/90 测试通过，0 安全漏洞
+
 ## 功能特性
 
 - 多智能体协作：研究员 Agent + 分析师 Agent

@@ -1,0 +1,14 @@
+[flake8]
+max-line-length = 127
+max-complexity = 10
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    *.egg-info
+extend-ignore =
+    E203,
+    W503
+per-file-ignores =
+    tests/*:F541, E402

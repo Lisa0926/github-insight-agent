@@ -15,7 +15,6 @@ API 端点:
 - GET /api/radar - 获取竞品对比雷达图数据
 """
 
-import json
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -23,15 +22,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
-from src.core.agentscope_persistent_memory import PersistentMemory
 from src.tools.github_tool import GitHubTool
 from src.tools.code_quality_tool import CodeQualityScorer
-from src.tools.pr_review_tool import review_pull_request, PRReviewer, CodeChange
+from src.tools.pr_review_tool import PRReviewer
 
 logger = get_logger(__name__)
 
@@ -51,6 +48,7 @@ def _validate_identifier(value: str, field_name: str) -> str:
     if not _OWNER_REPO_PATTERN.match(value):
         raise HTTPException(status_code=400, detail=f"{field_name} 包含非法字符")
     return value
+
 
 # ===========================================
 # FastAPI 应用
@@ -654,7 +652,9 @@ def _get_dashboard_html() -> str:
             document.getElementById('loading').classList.add('active');
 
             try {
-                const response = await fetch(`/api/projects/analyze?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&use_llm=${useLlm}`, {
+                const endpoint = `/api/projects/analyze?use_llm=${useLlm}`;
+                const url = `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${endpoint}`;
+                const response = await fetch(url, {
                     method: 'POST',
                 });
 

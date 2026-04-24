@@ -14,7 +14,6 @@ GitHub MCP Mock 客户端
 """
 
 import asyncio
-import json
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
@@ -200,8 +199,8 @@ class MockGitHubMCPClient:
 
     def _mock_get_readme(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """模拟 README 获取"""
-        owner = args.get("owner", "test")
-        repo = args.get("repo", "project")
+        repo = args.get("repo", "project")  # noqa: F841
+        owner = args.get("owner", "test")  # noqa: F841
 
         import base64
 

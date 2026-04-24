@@ -9,7 +9,6 @@ GitHub Toolkit - AgentScope Toolkit 集成
 - 支持流式返回和统一调用接口
 """
 
-from functools import partial
 from typing import Any, Dict, List, Optional
 from agentscope.tool import Toolkit, ToolResponse
 
@@ -21,7 +20,7 @@ from src.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-def create_github_toolkit(
+def create_github_toolkit(  # noqa: C901
     config: Optional[ConfigManager] = None,
     github_token: Optional[str] = None,
     use_mcp: bool = True,
@@ -205,13 +204,13 @@ def create_github_toolkit(
             )
 
             lines = [
-                f"**Project Summary: {summary['full_name']}**",
-                f"",
-                f"📊 Stars: {summary['stars']:,}",
-                f"🔧 Forks: {summary['forks']:,}",
-                f"💻 Language: {summary['language']}",
-                f"📝 Description: {summary['description']}",
-                f"🏷️ Topics: {', '.join(summary['topics']) if summary['topics'] else 'N/A'}",
+                "**Project Summary: {name}**".format(name=summary['full_name']),
+                "",
+                "📊 Stars: {stars}".format(stars=f"{summary['stars']:,}"),
+                "🔧 Forks: {forks}".format(forks=f"{summary['forks']:,}"),
+                "💻 Language: {language}".format(language=summary['language']),
+                "📝 Description: {description}".format(description=summary['description']),
+                "🏷️ Topics: {topics}".format(topics=', '.join(summary['topics']) if summary['topics'] else 'N/A'),
             ]
 
             if include_readme and summary.get("cleaned_readme_text"):
@@ -249,10 +248,10 @@ def create_github_toolkit(
             return ToolResponse.fail(error_message=rate_info["error"])
 
         lines = [
-            f"**GitHub API Rate Limit**",
-            f"Limit: {rate_info['limit']:,} requests/hour",
-            f"Remaining: {rate_info['remaining']:,} requests",
-            f"Authenticated: {'Yes' if rate_info.get('authenticated') else 'No'}",
+            "**GitHub API Rate Limit**",
+            "Limit: {limit} requests/hour".format(limit=f"{rate_info['limit']:,}"),
+            "Remaining: {remaining} requests".format(remaining=f"{rate_info['remaining']:,}"),
+            "Authenticated: {auth}".format(auth='Yes' if rate_info.get('authenticated') else 'No'),
         ]
 
         if rate_info.get("reset"):

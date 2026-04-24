@@ -18,7 +18,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional
 
 from src.core.logger import get_logger
 
@@ -153,12 +153,13 @@ def register_github_tools(github_tool_instance: Any) -> None:
     Args:
         github_tool_instance: GitHubTool 实例
     """
-    global global_registry
+    global_registry = ToolRegistry()
 
     # 注册 search_repositories
     global_registry.register_tool(
         name="search_repositories",
-        description="Search for GitHub repositories by keyword. Returns a list of repos with stars, language, and description.",
+        description="Search for GitHub repositories by keyword. "
+                    "Returns a list of repos with stars, language, and description.",
         func=github_tool_instance.search_repositories,
         parameters={
             "type": "object",
@@ -239,7 +240,8 @@ def register_github_tools(github_tool_instance: Any) -> None:
     # 注册 get_project_summary (Day 5-6 新增)
     global_registry.register_tool(
         name="get_project_summary",
-        description="Get a comprehensive project summary including repo info and cleaned README text. Use this to deeply understand a project.",
+        description="Get a comprehensive project summary including repo info "
+                    "and cleaned README text. Use this to deeply understand a project.",
         func=github_tool_instance.get_project_summary,
         parameters={
             "type": "object",

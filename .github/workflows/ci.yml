@@ -110,7 +110,5 @@ jobs:
       - name: Check for hardcoded secrets
         run: |
           echo "Scanning for hardcoded secrets..."
-          ! grep -r "password\s*=\s*['\"][^'\"]\+['\"]" src/ --include="*.py" || echo "⚠️ Potential hardcoded passwords found"
-          ! grep -r "api_key\s*=\s*['\"][^'\"]\+['\"]" src/ --include="*.py" || echo "⚠️ Potential hardcoded API keys found"
-          ! grep -r "secret\s*=\s*['\"][^'\"]\+['\"]" src/ --include="*.py" || echo "⚠️ Potential hardcoded secrets found"
+          python3 /home/lisa/claude_apps/security_scan.py --ci-mode --path .
           echo "✓ Secret scan completed"

@@ -16,9 +16,10 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.cli.cli_renderer import renderer
-from src.cli.interactive_cli import cli
-from src.core.config_manager import ConfigManager
+from src.cli.cli_renderer import renderer  # noqa: E402
+from src.cli.interactive_cli import cli  # noqa: E402
+from src.core.config_manager import ConfigManager  # noqa: E402
+from src.core.report_generator import ReportGenerator  # noqa: E402
 
 
 def print_welcome():
@@ -58,9 +59,8 @@ def check_environment():
         renderer.print_info("复制 .env.sample 为 .env 并配置 API Key")
 
 
-def run_interactive_mode():
+def run_interactive_mode():  # noqa: C901
     """运行交互模式"""
-    from src.workflows.report_generator import ReportGenerator
     from src.agents.researcher_agent import set_studio_config as set_researcher_studio
     from src.agents.analyst_agent import set_studio_config as set_analyst_studio
 
@@ -117,7 +117,7 @@ def run_interactive_mode():
 
                     owner, repo = args.split("/", 1)
 
-                    with renderer.create_progress("分析项目中...") as progress:
+                    with renderer.create_progress("分析项目中..."):  # noqa: F841
                         result = report_gen.analyst.analyze_project(owner, repo)
 
                     if result.get("error"):
@@ -137,7 +137,7 @@ def run_interactive_mode():
                         renderer.print_error("用法：/search <关键词>", "例如：/search Python web framework")
                         continue
 
-                    with renderer.create_progress(f"搜索：{args}") as progress:
+                    with renderer.create_progress(f"搜索：{args}"):  # noqa: F841
                         search_result = report_gen.researcher.search_and_analyze(query=args, sort="stars", per_page=5)
 
                     repos = search_result.get("repositories", [])

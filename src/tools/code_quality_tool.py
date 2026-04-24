@@ -24,7 +24,7 @@
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.core.logger import get_logger
 from src.core.config_manager import ConfigManager
@@ -152,7 +152,7 @@ class CodeQualityScorer:
 
         return signals
 
-    def _calculate_rule_based_score(self, signals: Dict[str, Any]) -> Dict[str, float]:
+    def _calculate_rule_based_score(self, signals: Dict[str, Any]) -> Dict[str, float]:  # noqa: C901
         """
         基于规则的初步评分
 

@@ -10,7 +10,6 @@ CLI 美化模块
 - 友好错误提示
 """
 
-import sys
 from typing import Any, Dict, List, Optional
 
 # 检查并导入 rich 库
@@ -21,8 +20,6 @@ try:
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
     from rich.markdown import Markdown
     from rich.syntax import Syntax
-    from rich.live import Live
-    from rich.text import Text
     from rich.box import ROUNDED
     RICH_AVAILABLE = True
 except ImportError:

@@ -106,7 +106,7 @@ def test_github_tool_get_project_summary_no_readme():
     print("=" * 60)
 
     from src.tools.github_tool import GitHubTool
-    from src.types.schemas import ToolResponse, GitHubRepo
+    from src.types.schemas import ToolResponse, GitHubRepo  # noqa: F401
 
     # Test that get_project_summary handles ValueError from get_readme gracefully
     # by verifying the code structure: get_project_summary has a try/except for ValueError

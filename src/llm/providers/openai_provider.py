@@ -5,7 +5,6 @@ OpenAI Provider
 实现 OpenAI LLM 提供商。
 """
 
-import asyncio
 from typing import Any, Dict, List, Optional
 
 from src.llm.providers.base import LLMProvider

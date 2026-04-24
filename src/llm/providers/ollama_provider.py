@@ -5,8 +5,7 @@ Ollama Provider (本地部署)
 实现 Ollama 本地 LLM 部署提供商。
 """
 
-import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.llm.providers.base import LLMProvider
 from src.core.logger import get_logger

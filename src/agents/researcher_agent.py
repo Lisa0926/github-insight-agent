@@ -11,7 +11,6 @@
 - 继承 AgentScope AgentBase
 """
 
-import json
 from typing import Any, Dict, List, Optional, Union
 import re
 from datetime import datetime, timedelta
@@ -21,7 +20,7 @@ from agentscope.message import Msg
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
 from src.core.agentscope_memory import AgentScopeMemory
-from src.core.agentscope_persistent_memory import PersistentMemory, get_persistent_memory
+from src.core.agentscope_persistent_memory import get_persistent_memory
 from src.core.studio_helper import StudioHelper, set_global_studio_config, forward_to_studio
 from src.tools.github_tool import GitHubTool
 from src.tools.tool_registry import register_github_tools, global_registry
@@ -33,7 +32,11 @@ try:
     TRACING_AVAILABLE = True
 except ImportError:
     TRACING_AVAILABLE = False
-    trace = lambda name=None: lambda func: func  # fallback
+
+    def trace(name=None):  # fallback
+        def decorator(func):
+            return func
+        return decorator
 
 logger = get_logger(__name__)
 

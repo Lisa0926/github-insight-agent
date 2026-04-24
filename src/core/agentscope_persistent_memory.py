@@ -55,9 +55,12 @@ class PersistentMemory:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 创建 SQLAlchemy 异步引擎（SQLite）
+        # pool_pre_ping ensures connections are validated before use
+        # pool_reset_on_return ensures connections are properly returned to pool
         self.engine = create_async_engine(
             f"sqlite+aiosqlite:///{self.db_path}",
             echo=False,
+            pool_pre_ping=True,
         )
 
         # 创建异步 Session
@@ -95,8 +98,25 @@ class PersistentMemory:
 
     async def close(self) -> None:
         """关闭数据库连接"""
+        # First ensure the async_session factory is disposed
+        if hasattr(self, 'async_session') and self.async_session:
+            # Close any lingering sessions
+            try:
+                async with self.engine.begin():
+                    pass  # Ensure all connections are returned
+            except Exception:
+                pass  # Ignore errors during cleanup
+        # Dispose the engine - this closes all pooled connections
         await self.engine.dispose()
         logger.debug("PersistentMemory database connection closed")
+
+    def __del__(self) -> None:
+        """确保连接在 GC 时被正确清理"""
+        try:
+            if hasattr(self, 'engine') and self.engine:
+                self._run_async(self.close())
+        except Exception:
+            pass  # During GC, cleanup may fail — suppress errors
 
     def __enter__(self) -> "PersistentMemory":
         """上下文管理器入口"""
@@ -112,14 +132,13 @@ class PersistentMemory:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
-        
+
         if loop and loop.is_running():
             # Already in an async context - use nest_asyncio or run in new thread
-            import concurrent.futures
             import threading
             result = None
             exception = None
-            
+
             def _run_in_thread():
                 nonlocal result, exception
                 new_loop = asyncio.new_event_loop()
@@ -130,7 +149,7 @@ class PersistentMemory:
                     exception = e
                 finally:
                     new_loop.close()
-            
+
             thread = threading.Thread(target=_run_in_thread)
             thread.start()
             thread.join()

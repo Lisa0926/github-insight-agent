@@ -13,7 +13,7 @@
 
 import asyncio
 import time
-from typing import Any, Dict, Optional, Callable
+from typing import Optional, Callable
 from functools import wraps
 
 import requests
@@ -22,7 +22,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
-    retry_if_result,
     RetryError,
 )
 
@@ -157,7 +156,7 @@ class ResilientHTTPClient:
         ),
         reraise=True,
     )
-    def request(
+    def request(  # noqa: C901
         self,
         method: str,
         url: str,
@@ -222,7 +221,7 @@ class ResilientHTTPClient:
             self._record_success()
             return response
 
-        except RetryError as e:
+        except RetryError:
             # 所有重试失败
             self._record_failure()
             logger.error(f"Request failed after all retries: {url}")
@@ -230,7 +229,7 @@ class ResilientHTTPClient:
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, RateLimitError):
             # These exceptions are caught and retried by tenacity
             raise
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             # Other exceptions — record failure for server errors only
             try:
                 if response.status_code >= 500:  # type: ignore[possibly-undefined]

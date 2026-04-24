@@ -85,10 +85,10 @@ class GitHubTool:
         }
 
         if self._token:
-            self._headers["Authorization"] = f"Bearer {self._token}"
-            logger.info("GitHub token configured")
+            self._headers["Authorization"] = f"token {self._token}"
+            logger.info("GitHub auth configured")
         else:
-            logger.warning("No GitHub token configured. Rate limits may apply.")
+            logger.warning("GitHub auth not configured. Rate limits may apply.")
 
         # 速率限制配置
         self._rate_limit = self._config.github_rate_limit

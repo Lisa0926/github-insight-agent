@@ -16,7 +16,6 @@ GitHub Insight Agent - 单元测试
 
 import os
 import sys
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -294,12 +293,12 @@ def test_github_tool_no_token():
         )
         print_result("无 Token 初始化", results["init_no_token"])
 
-        # 有 token 初始化
+        # 有 token 初始化 - GitHub API 使用 "token" prefix (非 Bearer)
         tool2 = GitHubTool(token="test-token-123")
         results["init_with_token"] = (
             tool2._token == "test-token-123"
             and "Authorization" in tool2._headers
-            and "Bearer test-token-123" in tool2._headers["Authorization"]
+            and "token test-token-123" in tool2._headers["Authorization"]
         )
         print_result("带 Token 初始化", results["init_with_token"])
 
@@ -531,9 +530,9 @@ def test_config_manager():
             results["get_method"] = True  # 空配置也算正常
         print_result("get 方法", results["get_method"])
 
-        # 清理测试环境变量
-        del os.environ["LOG_LEVEL"]
-        del os.environ["GITHUB_TIMEOUT"]
+        # 清理测试环境变量 (使用 pop 避免 KeyError)
+        os.environ.pop("LOG_LEVEL", None)
+        os.environ.pop("GITHUB_TIMEOUT", None)
 
     except Exception as e:
         print(f"  ✗ 异常：{e}")
@@ -549,7 +548,7 @@ def test_config_manager():
 # ===========================================
 # 测试 9: 输入验证函数 (dashboard_api)
 # ===========================================
-def test_input_validation():
+def test_input_validation():  # noqa: C901
     print_test_header("API 输入验证")
     results = {}
 
@@ -647,7 +646,7 @@ def test_tool_response_edge_cases():
 def run_all_tests():
     """运行所有单元测试"""
     print("\n" + "#" * 60)
-    print(f"# GitHub Insight Agent - 单元测试")
+    print("# GitHub Insight Agent - 单元测试")
     print(f"# 时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("#" * 60)
 

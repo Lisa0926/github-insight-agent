@@ -32,7 +32,22 @@ Project directory: `/home/lisa/claude_apps/github-insight-agent`
 - Add unit tests for critical functions
 - Add integration tests for API endpoints
 
-#### 1.4 Test Execution
+#### 1.4 AgentScope Memory 一致性检查（本项目特有）
+- [ ] PersistentMemory 初始化正确（db_path 指向有效 SQLite 文件）
+- [ ] conversation_history 表结构完整（id, role, content, timestamp）
+- [ ] memory_index 表支持向量/关键词检索
+- [ ] 写入后立即可读（无 SQLite 锁竞争）
+- [ ] 长时间运行无内存泄漏（monitor gc 警告）
+- [ ] 断连后可恢复（SQLite 文件未损坏）
+
+#### 1.5 MCP 连接验证（本项目特有）
+- [ ] MCP Client 初始化成功（从配置加载 server_url）
+- [ ] 与 MCP Server 握手成功（/health 检查通过）
+- [ ] 工具注册完整（list_tools 返回预期工具列表）
+- [ ] 消息路由正确（send_message 无 404）
+- [ ] 断线自动重连（max_retries=3, backoff=5s）
+
+#### 1.6 Test Execution
 ```bash
 cd /home/lisa/claude_apps/github-insight-agent
 source venv/bin/activate
@@ -168,6 +183,31 @@ load_dotenv('/home/lisa/.env')  # 加载全局配置
 import os
 api_key = os.getenv('DASHSCOPE_API_KEY')
 ```
+
+---
+
+## 📌 版本管理
+
+**自动化 changelog 生成**: `git-cliff`
+
+**配置位置**: `cliff.toml` (项目根目录)
+
+**发布流程:**
+```bash
+# 1. 生成 CHANGELOG
+git-cliff -o CHANGELOG.md
+
+# 2. 查看待发布的 commits
+git-cliff --unreleased
+
+# 3. 语义化版本号
+git tag v1.2.0
+```
+
+**Mission 执行后自动记录**:
+- 执行日期
+- 版本号（从 git tag 获取）
+- 关键变更摘要
 
 ---
 
