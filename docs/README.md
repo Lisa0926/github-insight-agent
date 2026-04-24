@@ -13,6 +13,7 @@
 | [快速参考](QUICK_REFERENCE.md) | 命令速查、配置位置 | 所有人 |
 | [用户手册](USER_GUIDE.md) | 完整使用指南 | 终端用户 |
 | [架构总结](ARCHITECTURE_SUMMARY.md) | 架构概览、学习路径 | 开发者 |
+| [Pre-commit Hooks](PRE_COMMIT_HOOKS.md) | 安全扫描配置和使用 | 贡献者 |
 
 ---
 
