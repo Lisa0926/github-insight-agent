@@ -47,7 +47,11 @@ def print_welcome():
         "  • '为我搜索最近一周内 star 最高的 3 个 Python 项目'\n"
         "  • '分析 microsoft/TypeScript'\n"
         "  • '找一些 Rust web framework'\n"
-        "  • '前 5 个最活跃的 AI 框架'"
+        "  • '前 5 个最活跃的 AI 框架'\n\n"
+        "🔧 快捷操作：\n"
+        "  • Tab 补全：输入 / 后按 Tab 可补全命令\n"
+        "  • ↑↓ 键：翻阅历史命令\n"
+        "  • Ctrl+Q：退出程序"
     )
 
 
@@ -55,8 +59,11 @@ def check_environment():
     """检查环境配置"""
     config = ConfigManager()
 
+    has_api_key = bool(config.dashscope_api_key)
+
     stats = {
         "配置文件": "✅" if config.env_loaded else "⚠️ 未加载",
+        "DashScope API Key": "✅" if has_api_key else "❌ 未设置",
         "模型": config.dashscope_model_name or "未设置",
         "日志级别": config.log_level,
         "调试模式": "开启" if config.debug_mode else "关闭",
@@ -67,6 +74,35 @@ def check_environment():
     if not config.env_loaded:
         renderer.print_warning("未检测到 .env 文件，部分功能可能不可用")
         renderer.print_info("复制 .env.sample 为 .env 并配置 API Key")
+
+    if not has_api_key:
+        renderer.print_warning("DashScope API Key 未配置（分析报告功能需要有效的 API Key）")
+        renderer.print_info("请检查 ~/.env 中的 DASHSCOPE_API_KEY 变量")
+
+    # 验证 API Key 是否有效（发送一次轻量请求）
+    if has_api_key:
+        try:
+            import dashscope
+            from dashscope import Generation
+            dashscope.api_key = config.dashscope_api_key
+            if config.dashscope_base_url:
+                dashscope.base_url = config.dashscope_base_url
+            resp = Generation.call(
+                model=config.dashscope_model_name,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5,
+            )
+            if resp.status_code != 200:
+                code = getattr(resp, 'code', 'Unknown')
+                msg = getattr(resp, 'message', 'Unknown error')
+                renderer.print_warning(f"DashScope API Key 验证失败: {code} - {msg}")
+                if code == "InvalidApiKey":
+                    renderer.print_info(f"模型: {config.dashscope_model_name}")
+                    base_url = getattr(dashscope, 'base_url', 'default')
+                    renderer.print_info(f"端点: {base_url}")
+                    renderer.print_info("如使用代理或自定义端点，请设置 DASHSCOPE_BASE_URL 环境变量")
+        except Exception as e:
+            renderer.print_warning(f"API Key 验证失败: {e}")
 
 
 def run_interactive_mode():  # noqa: C901
@@ -279,15 +315,21 @@ def run_interactive_mode():  # noqa: C901
                 elif parsed.intent == IntentType.REPORT:
                     # 生成详细报告
                     query = parsed.query
-                    with renderer.create_progress(f"生成报告：{query}"):
+                    time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
+                    with renderer.create_progress(f"生成报告：{query}{time_desc}"):
                         report = report_gen.execute(
                             query=query,
                             num_projects=parsed.num_results,
                             sort=parsed.sort_by,
                         )
                     renderer.print_success("报告生成完成！")
-                    # 显示报告摘要
-                    renderer.print_panel("📄 报告摘要", report[:500] + "..." if len(report) > 500 else report)
+                    # 显示完整报告（截断超过 10000 字符的超长报告）
+                    display_limit = 10000
+                    if len(report) > display_limit:
+                        renderer.print_panel("📄 报告", report[:display_limit])
+                        renderer.print_warning(f"报告已截断（{len(report)} 字符，显示前 {display_limit} 字符）")
+                    else:
+                        renderer.print_panel("📄 报告", report)
 
                 else:
                     # 未知意图，尝试当作搜索处理

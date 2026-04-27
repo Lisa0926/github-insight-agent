@@ -414,9 +414,11 @@ class AnalystAgent:
             # 使用 dashscope 直接调用（回退到原有实现）
             config = self.config
             dashscope.api_key = config.dashscope_api_key
+            if config.dashscope_base_url:
+                dashscope.base_url = config.dashscope_base_url
 
             # 构建 prompt
-            prompt = f"""你是一个资深技术架构师，请分析以下 GitHub 项目并提取关键信息：
+            prompt = f"""你是一个资深技术架构师，请深入分析以下 GitHub 项目并提取关键信息。
 
 ## 项目信息
 {project_info}
@@ -424,18 +426,29 @@ class AnalystAgent:
 ## README 内容
 {readme_content[:4000]}
 
-请严格按照以下 JSON 格式输出：
+请从以下维度进行深度分析：
+
+1. **核心功能**：项目解决的核心问题、主要功能点（2-3 句详细描述，不要泛泛而谈）
+2. **技术栈**：使用的编程语言、框架、库、工具
+3. **解决的痛点**：目标用户是谁？解决什么实际问题？
+4. **独特价值**：与同类产品相比的差异化优势
+5. **成熟度评估**：从文档完整性、代码质量、社区活跃度判断（early/beta/stable/mature）
+6. **推荐意见**：是否值得使用？适合什么场景？有什么风险或不足？
+7. **竞品对比**：与同类主流项目的对比（如果有）
+
+请严格按照以下 JSON 格式输出（所有数组字段至少包含 1 个有效条目，不要留空）：
 {{
-    "core_function": "一句话核心功能描述",
+    "core_function": "详细的核心功能描述（2-3 句）",
     "tech_stack": {{
         "language": "主要编程语言",
         "frameworks": ["框架 1", "框架 2"],
-        "key_dependencies": ["依赖 1", "依赖 2"]
+        "key_dependencies": ["依赖 1", "依赖 2", "依赖 3"]
     }},
-    "pain_points_solved": ["痛点 1", "痛点 2"],
-    "unique_value": "项目的独特价值",
-    "maturity_assessment": "项目成熟度评估 (early/beta/stable/mature)",
-    "recommendation": "是否推荐使用 (recommend/consider/avoid) 及理由"
+    "pain_points_solved": ["痛点 1", "痛点 2", "痛点 3"],
+    "unique_value": "项目的独特价值和差异化优势",
+    "maturity_assessment": "early/beta/stable/mature",
+    "recommendation": "推荐意见（recommend/consider/avoid）及理由（2-3 句）",
+    "competitive_analysis": "与同类产品的对比分析（1-2 句）"
 }}
 """
 
@@ -445,14 +458,42 @@ class AnalystAgent:
                 max_tokens=config.model_max_tokens,
             )
 
-            # 提取响应内容
+            # 提取响应内容（处理多种响应格式，全部安全访问）
             content = ""
-            if response.status_code == 200 and response.output:
-                output_dict = response.output if isinstance(response.output, dict) else {}
-                content = output_dict.get('text', '')
+            try:
+                if response.status_code == 200 and response.output:
+                    if isinstance(response.output, dict):
+                        content = response.output.get('text', '')
+                        if not content:
+                            content = response.output.get('content', '')
+                    else:
+                        # 对象属性访问
+                        choices = getattr(response.output, 'choices', None)
+                        if choices:
+                            content = choices[0].message.content
+                        else:
+                            text_attr = getattr(response.output, 'text', None)
+                            if text_attr:
+                                content = text_attr
+            except Exception as e:
+                logger.debug(f"Content extraction encountered error: {e}, "
+                             f"status_code={response.status_code}, "
+                             f"code={getattr(response, 'code', None)}, "
+                             f"message={getattr(response, 'message', None)}")
 
-                if not content and hasattr(response.output, 'choices'):
-                    content = response.output.choices[0].message.content
+            # Fallback: 尝试 response.text
+            if not content:
+                try:
+                    content = getattr(response, 'text', '') or ''
+                except Exception:
+                    pass
+
+            if not content:
+                logger.error(f"DashScope API returned empty content: status_code={response.status_code}, "
+                             f"code={getattr(response, 'code', None)}, "
+                             f"message={getattr(response, 'message', None)}, "
+                             f"output_type={type(response.output).__name__}, "
+                             f"output={response.output}")
 
             logger.info(f"LLM analysis completed via dashscope, response length: {len(content)}")
 

@@ -50,8 +50,13 @@ source venv/bin/activate
 # 3. 安装依赖
 pip install -r requirements.txt
 
-# 4. 运行
+# 4. 运行 CLI
 python run_cli.py
+```
+
+**常见问题:** 如果运行时报 `ModuleNotFoundError: No module named 'aiosqlite'`，请安装缺失的依赖：
+```bash
+pip install aiosqlite
 ```
 
 #### 方式 B: 直接运行

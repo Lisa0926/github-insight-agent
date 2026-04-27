@@ -36,20 +36,20 @@ class ParsedIntent:
 class NaturalLanguageParser:
     """自然语言解析器"""
 
-    # 时间范围关键词
+    # 时间范围关键词 (pattern -> 默认天数)
     TIME_PATTERNS = {
         "recent": [
-            r"最近 (\d+) 天",
-            r"过去 (\d+) 天",
-            r"近 (\d+) 天",
-            r"最近 (\d+) 周",
-            r"过去 (\d+) 周",
-            r"本周",
-            r"最近一周",
-            r"过去一周",
-            r"本月",
-            r"最近一月",
-            r"过去一月",
+            (r"最近 (\d+) 天", None),
+            (r"过去 (\d+) 天", None),
+            (r"近 (\d+) 天", None),
+            (r"最近 (\d+) 周", None),
+            (r"过去 (\d+) 周", None),
+            (r"本周", 7),
+            (r"最近一周", 7),
+            (r"过去一周", 7),
+            (r"本月", 30),
+            (r"最近一月", 30),
+            (r"过去一月", 30),
         ],
         "keywords": {
             "今天": "today",
@@ -63,12 +63,12 @@ class NaturalLanguageParser:
 
     # 数量关键词
     NUMBER_PATTERNS = [
-        r"前 (\d+) 个",
-        r"前 (\d+) 名",
-        r"排名 [前]？(\d+)",
-        r"(\d+) 个项目",
-        r"(\d+) 个仓库",
-        r"最多的 [前]？(\d+) 个",
+        r"前\s*(\d+)\s*个",
+        r"前\s*(\d+)\s*名",
+        r"排名\s*[前]?(\d+)",
+        r"(\d+)\s*个项目",
+        r"(\d+)\s*个仓库",
+        r"最多的\s*[前]?(\d+)\s*个",
         r"top[ -]?(\d+)",
     ]
 
@@ -145,6 +145,17 @@ class NaturalLanguageParser:
             if match:
                 return IntentType.ANALYZE, match.group(1)
 
+        # 检测组合意图：搜索 + 分析 → 报告
+        has_search = any(kw in text_lower for kw in self.INTENT_KEYWORDS[IntentType.SEARCH])
+        has_analyze = any(kw in text_lower for kw in self.INTENT_KEYWORDS[IntentType.ANALYZE])
+        if has_search and has_analyze:
+            # 使用 _extract_query 清理意图关键词和 connector
+            query = self._extract_query(
+                text,
+                self.INTENT_KEYWORDS[IntentType.SEARCH] + self.INTENT_KEYWORDS[IntentType.ANALYZE],
+            )
+            return IntentType.REPORT, query
+
         # 检查意图关键词
         for intent_type, keywords in self.INTENT_KEYWORDS.items():
             for keyword in keywords:
@@ -159,8 +170,10 @@ class NaturalLanguageParser:
             return IntentType.ANALYZE, text.strip()
 
         # 包含技术栈/领域关键词 → 搜索
-        tech_keywords = ["python", "rust", "go", "java", "javascript", "typescript",
-                        "web", "ai", "ml", "framework", "库", "工具"]
+        tech_keywords = [
+            "python", "rust", "go", "java", "javascript", "typescript",
+            "web", "ai", "ml", "framework", "库", "工具",
+        ]
         if any(kw in text_lower for kw in tech_keywords):
             return IntentType.SEARCH, text.strip()
 
@@ -201,10 +214,10 @@ class NaturalLanguageParser:
         text_lower = text.lower()
 
         # 检查具体天数
-        for pattern in self.TIME_PATTERNS["recent"]:
+        for pattern, default_days in self.TIME_PATTERNS["recent"]:
             match = re.search(pattern, text_lower)
             if match:
-                days = int(match.group(1)) if match.group(1) else 7
+                days = int(match.group(1)) if (match.lastindex and match.group(1)) else default_days
                 return f"pushed:>={(self._days_ago(days))}"
 
         # 检查关键词
@@ -236,6 +249,9 @@ class NaturalLanguageParser:
         # 移除意图关键词
         for keyword in intent_keywords:
             query = query.replace(keyword, "")
+
+        # 清理连接词残留
+        query = query.replace("并", "")
 
         # 移除数量词
         for pattern in self.NUMBER_PATTERNS:

@@ -120,14 +120,13 @@ class InteractiveCLI:
         """获取用户输入"""
         try:
             if self.session and PROMPT_TOOLKIT_AVAILABLE:
-                return self.session.prompt(
-                    prompt,
-                    rprompt="  [Ctrl+Q 退出 | ↑↓ 历史 | Tab 补全]",
-                )
+                return self.session.prompt(prompt)
             else:
                 return input(prompt)
-        except (KeyboardInterrupt, EOFError):
-            return None
+        except KeyboardInterrupt:
+            raise
+        except EOFError:
+            raise
 
     def clear_input_buffer(self):
         """清除输入缓冲"""

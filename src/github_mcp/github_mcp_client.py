@@ -123,10 +123,15 @@ def create_github_mcp_client(
 def _run_async(coro):
     """运行异步协程"""
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        asyncio.get_running_loop()
+        raise RuntimeError("_run_async cannot be called from a running event loop")
+    except RuntimeError as e:
+        if "no running event loop" in str(e):
+            pass
+        else:
+            raise
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
 
 

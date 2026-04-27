@@ -53,6 +53,14 @@ class ReportGenerator:
 
 ---
 
+## 项目对比总览
+
+| 排名 | 项目 | Stars | 语言 | 成熟度 | 推荐度 |
+|------|------|-------|------|--------|--------|
+{comparison_table}
+
+---
+
 ## 项目详情
 
 {project_details}
@@ -262,6 +270,9 @@ class ReportGenerator:
             search_results, analysis_results
         )
 
+        # 生成项目对比表格
+        comparison_table = self._generate_comparison_table(analysis_results)
+
         # 生成项目详情
         project_details = self._generate_project_details(analysis_results)
 
@@ -274,6 +285,7 @@ class ReportGenerator:
             query=query,
             project_count=len(search_results),
             executive_summary=executive_summary,
+            comparison_table=comparison_table,
             project_details=project_details,
             overall_assessment=overall_assessment,
         )
@@ -296,19 +308,104 @@ class ReportGenerator:
 
         # 计算总 stars
         total_stars = sum(r.get("stars", 0) for r in search_results)
+        avg_stars = total_stars // len(search_results) if search_results else 0
+        max_stars = max((r.get("stars", 0) for r in search_results), default=0)
+        top_project = next(
+            (r.get("project", r.get("full_name", ""))
+             for r in search_results if r.get("stars") == max_stars),
+            ""
+        )
 
         # 提取主要编程语言
-        languages = set(r.get("language", "Unknown") for r in search_results if r.get("language"))
+        languages = {}
+        for r in search_results:
+            lang = r.get("language", "Unknown")
+            if lang and lang != "Unknown":
+                languages[lang] = languages.get(lang, 0) + 1
+
+        # 成熟度统计
+        maturity_counts = {}
+        for r in analysis_results:
+            analysis = r.get("analysis", {})
+            if analysis:
+                mat = analysis.get("maturity_assessment", "unknown")
+                if mat and mat != "unknown":
+                    maturity_counts[mat] = maturity_counts.get(mat, 0) + 1
 
         summary_lines = [
             f"本次搜索共找到 **{len(search_results)}** 个项目，成功深度分析 **{successful}** 个。",
-            f"这些项目的总 Star 数超过 **{total_stars:,}** 颗。",
-            f"主要涉及的编程语言包括：{', '.join(languages) if languages else '多种'}。",
-            "",
-            "以下是各项目的详细分析：",
+            f"这些项目的总 Star 数超过 **{total_stars:,}** 颗，平均 **{avg_stars:,}** 颗。",
         ]
 
+        if top_project:
+            summary_lines.append(f"🏆 最受关注项目：**{top_project}**（⭐ {max_stars:,}）")
+
+        # 语言分布
+        if languages:
+            lang_str = ", ".join(
+                f"{lang} ({count})" for lang, count in sorted(languages.items(), key=lambda x: x[1], reverse=True)
+            )
+            summary_lines.append(f"主要编程语言：{lang_str}")
+
+        # 成熟度概览
+        if maturity_counts:
+            mat_labels = {
+                "mature": "🔵成熟",
+                "stable": "🟢稳定",
+                "beta": "🟠Beta",
+                "early": "🟡早期",
+            }
+            mat_str = ", ".join(
+                f"{mat_labels.get(k, k)} ({v})" for k, v in maturity_counts.items()
+            )
+            summary_lines.append(f"成熟度分布：{mat_str}")
+
+        summary_lines.extend([
+            "",
+            "以下是各项目的详细分析：",
+        ])
+
         return "\n".join(summary_lines)
+
+    def _generate_comparison_table(
+        self,
+        analysis_results: List[Dict[str, Any]],
+    ) -> str:
+        """生成项目对比表格"""
+        maturity_map = {
+            "early": "🟡 Early",
+            "beta": "🟠 Beta",
+            "stable": "🟢 Stable",
+            "mature": "🔵 Mature",
+        }
+
+        rows = []
+        for i, result in enumerate(analysis_results, 1):
+            project = result.get("project", "Unknown")
+            stars = result.get("stars", 0)
+            language = result.get("language", "N/A")
+            analysis = result.get("analysis", {})
+
+            maturity = analysis.get("maturity_assessment", "unknown")
+            maturity_display = maturity_map.get(maturity, f"? {maturity}")
+
+            rec = analysis.get("recommendation", "")
+            if isinstance(rec, str):
+                rec_lower = rec.lower()
+                if "recommend" in rec_lower:
+                    rec_display = "✅ 推荐"
+                elif "avoid" in rec_lower:
+                    rec_display = "❌ 谨慎"
+                else:
+                    rec_display = "⚠️ 可考虑"
+            else:
+                rec_display = "⚠️ 可考虑"
+
+            rows.append(
+                f"| {i} | {project} | ⭐ {stars:,} | {language} | {maturity_display} | {rec_display} |"
+            )
+
+        return "\n".join(rows)
 
     def _generate_project_details(
         self,
@@ -336,34 +433,68 @@ class ReportGenerator:
             core_function = analysis.get("core_function", "Unknown")
             tech_stack = analysis.get("tech_stack", {})
             pain_points = analysis.get("pain_points_solved", [])
+            unique_value = analysis.get("unique_value", "")
             recommendation = analysis.get("recommendation", "Unknown")
+            competitive = analysis.get("competitive_analysis", "")
+
+            # 构建技术栈文本
+            frameworks = tech_stack.get("frameworks", [])
+            dependencies = tech_stack.get("key_dependencies", [])
+            lang = tech_stack.get("language", "N/A")
 
             # 生成 Star 进度条
             star_bar = self._generate_star_bar(stars, max_stars)
 
-            detail = f"""### {i}. [{project_name}]({url})
+            # 构建项目详情
+            detail_lines = [
+                f"### {i}. [{project_name}]({url})",
+                "",
+                "| 指标 | 值 |",
+                "|------|-----|",
+                f"| Stars | {star_bar} ⭐ {stars:,} |",
+                f"| 语言 | {language} |",
+                "",
+                "#### 核心功能",
+                core_function,
+                "",
+                "#### 技术栈",
+                f"- **语言**: {lang}",
+            ]
 
-| 指标 | 值 |
-|------|-----|
-| Stars | {star_bar} ⭐ {stars:,} |
-| 语言 | {language} |
+            if frameworks:
+                detail_lines.append(f"- **框架**: {', '.join(frameworks)}")
+            if dependencies:
+                detail_lines.append(f"- **关键依赖**: {', '.join(dependencies)}")
 
-#### 核心功能
-{core_function}
+            detail_lines.extend([
+                "",
+                "#### 解决的痛点",
+                self._format_list(pain_points),
+            ])
 
-#### 技术栈
-- **语言**: {tech_stack.get('language', 'N/A')}
-- **框架**: {', '.join(tech_stack.get('frameworks', ['N/A']))}
-- **关键依赖**: {', '.join(tech_stack.get('key_dependencies', ['N/A']))}
+            if unique_value:
+                detail_lines.extend([
+                    "",
+                    "#### 独特价值",
+                    unique_value,
+                ])
 
-#### 解决的痛点
-{self._format_list(pain_points)}
+            if competitive:
+                detail_lines.extend([
+                    "",
+                    "#### 竞品对比",
+                    competitive,
+                ])
 
-#### 推荐意见
-{recommendation}
+            detail_lines.extend([
+                "",
+                "#### 推荐意见",
+                recommendation,
+                "",
+                "---",
+            ])
 
----
-"""
+            detail = "\n".join(detail_lines)
             details.append(detail)
 
         return "\n".join(details)
@@ -440,6 +571,78 @@ class ReportGenerator:
             f"- 🟢 推荐 (Recommend): {rec_counts['recommend']} 个",
             f"- 🟡 可考虑 (Consider): {rec_counts['consider']} 个",
             f"- 🔴 谨慎 (Avoid): {rec_counts['avoid']} 个",
+        ])
+
+        # 成熟度分布
+        if maturities:
+            mat_counts = {}
+            for mat in maturities:
+                mat_lower = mat.lower() if isinstance(mat, str) else str(mat)
+                mat_counts[mat_lower] = mat_counts.get(mat_lower, 0) + 1
+            mat_display = {
+                "mature": "🔵 成熟 (Mature)",
+                "stable": "🟢 稳定 (Stable)",
+                "beta": "🟠 Beta",
+                "early": "🟡 早期 (Early)",
+            }
+            assessment_lines.extend([
+                "",
+                "#### 成熟度分布",
+            ])
+            for mat_key, mat_label in mat_display.items():
+                count = mat_counts.get(mat_key, 0)
+                if count > 0:
+                    assessment_lines.append(f"- {mat_label}: {count} 个")
+
+        # 按 Star 排名
+        assessment_lines.extend([
+            "",
+            "#### 综合排名",
+            "（综合 Star 数、成熟度、推荐度）",
+            "",
+        ])
+
+        for i, result in enumerate(analysis_results, 1):
+            project = result.get("project", "Unknown")
+            stars = result.get("stars", 0)
+            analysis = result.get("analysis", {})
+            maturity = analysis.get("maturity_assessment", "unknown")
+            rec = analysis.get("recommendation", "")
+            rec_label = "✅" if "recommend" in rec.lower() else ("❌" if "avoid" in rec.lower() else "⚠️")
+            assessment_lines.append(
+                f"{i}. **{project}** - ⭐ {stars:,} | {maturity} | {rec_label}"
+            )
+
+        # 技术栈分析
+        languages = {}
+        frameworks = {}
+        for result in analysis_results:
+            analysis = result.get("analysis", {})
+            tech = analysis.get("tech_stack", {})
+            if tech:
+                lang = tech.get("language", "")
+                if lang and lang != "N/A":
+                    languages[lang] = languages.get(lang, 0) + 1
+                for fw in tech.get("frameworks", []):
+                    frameworks[fw] = frameworks.get(fw, 0) + 1
+
+        if languages:
+            assessment_lines.extend([
+                "",
+                "#### 技术生态",
+                "",
+                "**编程语言分布**:",
+            ])
+            for lang, count in sorted(languages.items(), key=lambda x: x[1], reverse=True):
+                assessment_lines.append(f"- {lang}: {count} 个项目")
+
+        if frameworks:
+            assessment_lines.append("")
+            assessment_lines.append("**常用框架**:")
+            for fw, count in sorted(frameworks.items(), key=lambda x: x[1], reverse=True)[:5]:
+                assessment_lines.append(f"- {fw} ({count})")
+
+        assessment_lines.extend([
             "",
             "#### 整体建议",
             "根据项目 Star 数量、技术栈成熟度、文档完整性等因素综合评估，",
