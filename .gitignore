@@ -5,8 +5,8 @@
 # 敏感信息和配置
 .env
 .env.*
+!.env.sample
 *.env
-.env.sample
 config/api_key.json
 configs/model_configs.json
 
@@ -63,12 +63,8 @@ node_modules/
 # Git hooks (源文件在 .githooks/)
 .git/hooks/
 
-# Hermes 内部任务文件 (保留 archive 用于历史归档)
-.hermes/tasks/
-.hermes/ci_results.md
-.hermes/mission-results/
-.hermes/mission-log
-.hermes/MISSION_INDEX.md
+# Hermes internal task files (entire directory, preserve archive for history)
+.hermes/
 
 # Migration plan (internal working document, not for public repo)
 docs/MIGRATION_PLAN.md

@@ -110,5 +110,5 @@ jobs:
       - name: Check for hardcoded secrets
         run: |
           echo "Scanning for hardcoded secrets..."
-          python3 /home/lisa/claude_apps/security_scan.py --ci-mode --path .
-          echo "✓ Secret scan completed"
+          python3 .github/scripts/secret_scan.py --ci-mode --path .
+          echo "Secret scan completed"

@@ -88,7 +88,7 @@ chmod +x .git/hooks/pre-commit
    import os
    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
    ```
-2. 将敏感信息添加到 `/home/lisa/.env` 文件 | Add secrets to `/home/lisa/.env`
+2. 将敏感信息添加到全局 `~/.env` 文件 | Add secrets to global `~/.env` file
 3. 如果只是测试占位符，使用 `YOUR_TOKEN_HERE` | Use `YOUR_TOKEN_HERE` for placeholders
 
 ## Bypassing Hooks (Emergency Only)

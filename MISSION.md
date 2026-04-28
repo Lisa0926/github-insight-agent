@@ -1,6 +1,6 @@
 # github-insight-agent Mission
 
-Project directory: `/home/lisa/claude_apps/github-insight-agent`
+Project directory: `<project_root>`
 
 ---
 
@@ -49,7 +49,7 @@ Project directory: `/home/lisa/claude_apps/github-insight-agent`
 
 #### 1.6 Test Execution
 ```bash
-cd /home/lisa/claude_apps/github-insight-agent
+cd <project_root>
 source venv/bin/activate
 python tests/test_integration.py
 ```
@@ -123,7 +123,7 @@ Format:
 ## Output Format
 
 ### 详细报告保存位置
-- 目录：`/home/lisa/claude_apps/github-insight-agent/.hermes/mission-results/`
+- Directory: `.hermes/mission-results/`
 - 文件名：`mission-YYYYMMDD-HHMMSS-{part1|part2}.md`
 
 ### 微信推送格式 (手机端优化)
@@ -155,7 +155,7 @@ Format:
 - 接收人：当前会话用户
 
 **推送语气:** 工程师风格 + 温暖结尾
-- 称呼：「Lisa」
+- Name: session user
 - 风格：专业、清晰、工程师视角
 - 结尾：「祝您今天心情美美的～」💖
 
@@ -165,7 +165,7 @@ Format:
 
 ## 🔒 安全规则 - 敏感信息管理
 
-**所有敏感信息必须存放在全局 `/home/lisa/.env` 中，禁止在项目目录中存储:**
+**All sensitive information must be stored in global `~/.env`, prohibited in project directory:**
 
 ❌ **禁止在项目中的内容:**
 - API Keys (DASHSCOPE_API_KEY, ANTHROPIC_AUTH_TOKEN, etc.)
@@ -174,12 +174,12 @@ Format:
 - 飞书 Group ID / User ID
 - 任何密码或密钥
 
-✅ **全局配置位置:** `/home/lisa/.env`
+Global config location: `~/.env`
 
-**项目配置方式:**
+**Project config method:**
 ```python
 from dotenv import load_dotenv
-load_dotenv('/home/lisa/.env')  # 加载全局配置
+load_dotenv(Path.home() / ".env")  # Load global config
 import os
 api_key = os.getenv('DASHSCOPE_API_KEY')
 ```

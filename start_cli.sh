@@ -1,7 +1,8 @@
 #!/bin/bash
-# GitHub Insight Agent CLI 启动脚本
-# 用法：./start_cli.sh
+# GitHub Insight Agent CLI startup script
+# Usage: ./start_cli.sh
 
-cd /home/lisa/claude_apps/github-insight-agent
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 source venv/bin/activate
 python run_cli.py
