@@ -20,9 +20,11 @@
 - *(llm)* Unify LLM calls from direct dashscope.Generation.call() to DashScopeWrapper
 - *(docs)* Update architecture diagram with AgentPipeline and DashScopeWrapper
 - *(docs)* Translate all developer comments and docstrings to English
-- *(docs)* Move internal docs (migration plan, pre-commit hooks) to internal/ directory
+- *(docs)* Move internal docs (migration plan, pre-commit hooks, mission) to internal/ directory
 - *(fix)* Handle ChatResponse as dict subclass in _extract_response_text()
 - *(security)* Remove hardcoded local paths from tracked files (githooks/README.md, MISSION.md, start_cli.sh, ci.yml)
+- *(fix)* Update test assertions for English-translated compressed summary header
+- *(test)* Fix agent integration test to avoid async reply() method (AgentScope hooks)
 
 ### Chore
 
