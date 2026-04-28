@@ -14,12 +14,12 @@
 │                         GitHub Insight Agent                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
-│  │   CLI       │    │   Web UI    │    │  Hermes     │                 │
-│  │  命令行接口  │    │  可视化界面  │    │  定时任务   │                 │
-│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                 │
-│         │                  │                  │                         │
-│         └──────────────────┼──────────────────┘                         │
+│  ┌─────────────┐                  ┌─────────────┐                         │
+│  │   CLI       │                  │  Hermes     │                         │
+│  │  命令行接口  │                  │  定时任务   │                         │
+│  └──────┬──────┘                  └──────┬──────┘                         │
+│         │                                │                                 │
+│         └────────────────────────────────┘                                 │
 │                            │                                            │
 │                   ┌────────▼────────┐                                   │
 │                   │ AgentPipeline   │                                   │
@@ -90,7 +90,7 @@
    │
    ▼
 ┌─────────────────┐
-│  CLI / Web UI   │
+│  CLI / Web     │
 │  接收用户输入    │
 └────────┬────────┘
          │
@@ -126,7 +126,7 @@
          ▼
 ┌─────────────────┐
 │  输出到 CLI /   │
-│  Web / 微信     │
+│  定时任务推送    │
 └─────────────────┘
 ```
 
@@ -177,7 +177,7 @@ src/core/
 #### ConfigManager
 ```python
 config = ConfigManager()  # 单例
-api_key = config.get_api_key("qwen-max")
+api_key = config.get_api_key("YOUR_MODEL_NAME_HERE")
 ```
 
 #### PersistentMemory
@@ -271,21 +271,6 @@ gia /scan <文件>            # 安全扫描
 
 ---
 
-### 2.7 Web 层 (src/web/)
-
-```
-src/web/
-├── dashboard_api.py        # FastAPI 后端
-└── __init__.py
-```
-
-#### API 端点
-- `GET /api/projects` - 项目列表
-- `GET /api/projects/{owner}/{repo}` - 项目详情
-- `GET /api/radar` - 雷达图数据
-
----
-
 ### 2.8 类型定义 (src/types/)
 
 ```
@@ -323,12 +308,12 @@ FEISHU_GROUP_ID=xxx
 
 ```json
 {
-  "qwen-max": {
+  "YOUR_MODEL_A": {
     "provider": "dashscope",
     "api_key": "DASHSCOPE_API_KEY",
     "temperature": 0.7
   },
-  "gpt-4": {
+  "YOUR_MODEL_B": {
     "provider": "openai",
     "api_key": "OPENAI_API_KEY",
     "temperature": 0.7

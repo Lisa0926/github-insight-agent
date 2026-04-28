@@ -12,6 +12,7 @@
 - *(api)* Add GIA_DASHSCOPE_API_KEY for isolated model key from Claude Code
 - *(security)* Add secret scan script for CI pipeline (scans tracked files for hardcoded secrets)
 - *(config)* Add .env.sample as configuration template with placeholders
+- *(security)* Add hardcoded model name detection to secret scanner
 
 ### Changed
 
@@ -25,10 +26,14 @@
 - *(security)* Remove hardcoded local paths from tracked files (githooks/README.md, MISSION.md, start_cli.sh, ci.yml)
 - *(fix)* Update test assertions for English-translated compressed summary header
 - *(test)* Fix agent integration test to avoid async reply() method (AgentScope hooks)
+- *(security)* Replace all hardcoded model names with DASHSCOPE_MODEL env var
+- *(docs)* Remove Web UI references from architecture diagram (no web UI implemented yet)
 
 ### Removed
 
 - *(cli)* Remove start_cli.sh (redundant with run_cli.py and gia entry point)
+- *(docs)* Remove Web UI from architecture diagrams
+- *(security)* Remove hardcoded API key from .claude/settings.local.json
 
 ### Chore
 

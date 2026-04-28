@@ -6,6 +6,8 @@ Compatible with AgentScope DashScopeChatModel interface, using dashscope.Generat
 Resolves DashScopeChatModel async compatibility issues.
 """
 
+import os
+import os
 from typing import Any, Dict, List
 
 import dashscope
@@ -26,11 +28,11 @@ class DashScopeWrapper:
 
     def __init__(
         self,
-        model_name: str = "qwen-max",
+        model_name: str = "",
         api_key: str = "",
         base_url: str = "",
     ):
-        self.model_name = model_name
+        self.model_name = model_name or os.getenv("DASHSCOPE_MODEL", "")
         self.api_key = api_key
         self.base_url = base_url
 

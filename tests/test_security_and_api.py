@@ -388,9 +388,9 @@ class TestProviderFactory:
         from src.llm.provider_factory import get_provider
         from src.llm.providers.dashscope_provider import DashScopeProvider
 
-        provider = get_provider("dashscope", api_key="test_key", model="qwen-turbo")
+        provider = get_provider("dashscope", api_key="test_key", model="YOUR_TEST_MODEL")
         assert isinstance(provider, DashScopeProvider)
-        assert provider.model == "qwen-turbo"
+        assert provider.model == "YOUR_TEST_MODEL"
 
     def test_get_provider_openai(self):
         """测试创建 OpenAI provider"""
@@ -802,7 +802,7 @@ class TestConfigManagerAdditional:
         from src.core.config_manager import ConfigManager
 
         config = ConfigManager()
-        model_config = config.get_model_config("qwen-max")
+        model_config = config.get_model_config("YOUR_MODEL_NAME_HERE")
         assert isinstance(model_config, dict)
 
     def test_api_key_priority(self):
@@ -811,7 +811,7 @@ class TestConfigManagerAdditional:
 
         config = ConfigManager()
         # Should return env var if set
-        api_key = config.get_api_key("qwen-max")
+        api_key = config.get_api_key("YOUR_MODEL_NAME_HERE")
         assert isinstance(api_key, str)
 
     def test_properties_return_strings(self):

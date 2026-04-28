@@ -82,7 +82,7 @@ class ResearcherAgent(GiaAgentBase):
     def __init__(
         self,
         name: str = "Researcher",
-        model_name: str = "qwen-max",
+        model_name: str = "",
         config: Optional[ConfigManager] = None,
         use_toolkit: bool = True,
         use_mcp: bool = True,

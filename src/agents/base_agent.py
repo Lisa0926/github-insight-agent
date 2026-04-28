@@ -43,7 +43,7 @@ class GiaAgentBase(AgentBase):
     def __init__(
         self,
         name: str,
-        model_name: str = "qwen-max",
+        model_name: str = "",
         system_prompt: Optional[str] = None,
         config: Optional[ConfigManager] = None,
         use_persistent: bool = True,
@@ -54,7 +54,7 @@ class GiaAgentBase(AgentBase):
 
         Args:
             name: Agent name
-            model_name: Model name (default: qwen-max)
+            model_name: Model name (default: from DASHSCOPE_MODEL env var)
             system_prompt: System prompt
             config: Configuration manager
             use_persistent: Whether to use persistent storage (default: True)
@@ -63,8 +63,8 @@ class GiaAgentBase(AgentBase):
         super().__init__()
 
         self.name = name
-        self.model_name = model_name
         self.config = config or ConfigManager()
+        self.model_name = model_name or self.config.dashscope_model_name
         self.system_prompt = system_prompt or self._default_system_prompt()
 
         # Memory: reuse existing wrappers

@@ -93,7 +93,7 @@ class ConfigManager:
         Get a configuration value
 
         Args:
-            key: Configuration key, supports dot notation (e.g. "qwen-max.api_key")
+            key: Configuration key, supports dot notation
             default: Default value
 
         Returns:
@@ -115,7 +115,7 @@ class ConfigManager:
         Get complete configuration for a specific model
 
         Args:
-            model_name: Model name (e.g. "qwen-max")
+            model_name: Model name
 
         Returns:
             Model configuration dictionary
@@ -133,12 +133,7 @@ class ConfigManager:
             API Key or None
         """
         # Prioritize reading from environment variables
-        env_key_map = {
-            "qwen-max": "DASHSCOPE_API_KEY",
-            "qwen-plus": "DASHSCOPE_API_KEY",
-            "qwen-turbo": "DASHSCOPE_API_KEY",
-        }
-        env_var = env_key_map.get(model_name, "DASHSCOPE_API_KEY")
+        env_var = "DASHSCOPE_API_KEY"
         api_key = os.getenv(env_var)
 
         if api_key:
@@ -173,7 +168,7 @@ class ConfigManager:
     @property
     def dashscope_model_name(self) -> str:
         """Get default model name"""
-        return os.getenv("DASHSCOPE_MODEL_NAME", "qwen-max")
+        return os.getenv("DASHSCOPE_MODEL", "")
 
     @property
     def dashscope_base_url(self) -> str:

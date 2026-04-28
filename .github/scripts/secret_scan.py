@@ -72,6 +72,11 @@ SECRET_PATTERNS = {
         "severity": "HIGH",
         "msg": "Windows local path exposure (may leak username)",
     },
+    "hardcoded_model_name": {
+        "re": r"(qwen-max|qwen-plus|qwen-turbo|qwen-long)",
+        "severity": "MEDIUM",
+        "msg": "Hardcoded model name (use DASHSCOPE_MODEL_NAME env var instead)",
+    },
 }
 
 # Directories to skip
@@ -138,6 +143,10 @@ def scan_content(content: str, filepath: str) -> list:
     for line_num, line in enumerate(content.split("\n"), 1):
         # Skip comments and blank lines
         if not line.strip() or is_comment(line):
+            continue
+
+        # Skip regex pattern definitions (contains pattern syntax like r"(")
+        if 'r"(' in line or "r'(" in line:
             continue
 
         # Skip allowed placeholders

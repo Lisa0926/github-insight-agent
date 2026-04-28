@@ -312,7 +312,7 @@ def run_agent_demo():
         logger.info(f"Studio config set for run: {run_id}")
 
     # 实例化 Agent
-    agent = ResearcherAgent(name="Researcher", model_name="qwen-max")
+    agent = ResearcherAgent(name="Researcher")
 
     # 显示 Agent 状态
     status = agent.get_status()

@@ -580,6 +580,15 @@ class OWASPRuleEngine:
             "suggestion": "使用显式的条件检查和异常处理",
             "cwe_id": "CWE-703"
         },
+        "gen_bare_except": {
+            "pattern": r"except\s*:",
+            "category": IssueCategory.A05_MISCONFIGURATION,
+            "severity": IssueSeverity.MEDIUM,
+            "owasp_id": "General",
+            "message": "使用裸 except 会捕获所有异常 (包括 KeyboardInterrupt 和 SystemExit)",
+            "suggestion": "明确指定要捕获的异常类型，如 except ValueError: 或 except Exception:",
+            "cwe_id": "CWE-703"
+        },
         "gen_random": {
             "pattern": r"\brandom\.(random|randint|choice|shuffle)",
             "category": IssueCategory.GENERAL_SECURITY,

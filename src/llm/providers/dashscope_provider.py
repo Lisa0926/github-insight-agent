@@ -19,14 +19,16 @@ class DashScopeProvider(LLMProvider):
     DashScope (Alibaba Cloud Bailian) LLM provider
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "qwen-max"):
+    def __init__(self, api_key: Optional[str] = None, model: str = ""):
         """
         Initialize DashScope Provider
 
         Args:
             api_key: API Key (read from environment variable if not provided)
-            model: Default model name
+            model: Default model name (default: from DASHSCOPE_MODEL env var)
         """
+        import os
+        self.model = model or os.getenv("DASHSCOPE_MODEL", "")
         self.api_key = api_key
         self.model = model
 
@@ -83,4 +85,4 @@ class DashScopeProvider(LLMProvider):
         return ""
 
     def get_available_models(self) -> List[str]:
-        return ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-long"]
+        return ["YOUR_MODEL_A", "YOUR_MODEL_B", "YOUR_MODEL_C", "YOUR_MODEL_D"]

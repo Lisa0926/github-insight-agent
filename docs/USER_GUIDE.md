@@ -419,7 +419,7 @@ from src.core.config_manager import ConfigManager
 config = ConfigManager()
 
 # 获取模型配置
-model_config = config.get_model_config("qwen-max")
+model_config = config.get_model_config("YOUR_MODEL_NAME_HERE")
 
 # 切换 LLM 提供商
 config.set_provider("openai")

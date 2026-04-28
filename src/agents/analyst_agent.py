@@ -155,7 +155,7 @@ class AnalystAgent(GiaAgentBase):
     def __init__(
         self,
         name: str = "Analyst",
-        model_name: str = "qwen-max",
+        model_name: str = "",
         system_prompt: Optional[str] = None,
         config: Optional[ConfigManager] = None,
         use_toolkit: bool = True,

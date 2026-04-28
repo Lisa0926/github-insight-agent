@@ -147,7 +147,7 @@ def test_config_manager_get_api_key():
     cm = ConfigManager()
 
     # Verify the method returns a string and delegates to os.getenv
-    key = cm.get_api_key("qwen-max")
+    key = cm.get_api_key("YOUR_MODEL_NAME_HERE")
     assert isinstance(key, str), f"API key should be string, got {type(key)}"
     assert len(key) > 0, "API key should be configured"
     print(f"  ✓ get_api_key() 返回有效字符串（长度 {len(key)}）")

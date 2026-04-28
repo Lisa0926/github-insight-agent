@@ -90,7 +90,7 @@ github-insight-agent/
 from src.core.config_manager import ConfigManager
 
 config = ConfigManager()
-api_key = config.get_api_key("qwen-max")
+api_key = config.get_api_key("YOUR_MODEL_NAME_HERE")
 ```
 
 ### 日志系统
