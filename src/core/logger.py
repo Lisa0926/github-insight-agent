@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-日志封装模块 - 基于 loguru 的全局 Logger
+Logger wrapper module - Global Logger based on loguru
 
-功能:
-- 统一的日志格式 (时间、文件名、行号、日志级别、消息)
-- 同时输出到控制台和文件
-- 支持日志轮转和清理
+Features:
+- Unified log format (time, filename, line number, log level, message)
+- Output to both console and file
+- Support log rotation and cleanup
 
-使用示例:
+Usage example:
     from src.core.logger import get_logger
     logger = get_logger(__name__)
-    logger.info("这是一条信息日志")
+    logger.info("This is an info log")
 """
 
 import sys
@@ -28,33 +28,33 @@ def get_logger(
     level: str = "INFO",
 ) -> loguru_logger:
     """
-    获取配置好的 logger 实例
+    Get a configured logger instance
 
     Args:
-        name: 模块名称 (通常传入 __name__)
-        log_file: 日志文件路径，默认 logs/app.log
-        rotation: 日志轮转大小，默认 10MB
-        retention: 日志保留时间，默认 7 天
-        level: 日志级别，默认 INFO
+        name: Module name (usually pass __name__)
+        log_file: Log file path, defaults to logs/app.log
+        rotation: Log rotation size, defaults to 10MB
+        retention: Log retention time, defaults to 7 days
+        level: Log level, defaults to INFO
 
     Returns:
-        配置好的 loguru logger 实例
+        Configured loguru logger instance
     """
-    # 移除默认的 handler
+    # Remove default handler
     loguru_logger.remove()
 
-    # 确定日志目录
+    # Determine log directory
     base_dir = Path(__file__).parent.parent.parent
     logs_dir = base_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    # 日志文件路径
+    # Log file path
     if log_file is None:
         log_file = str(logs_dir / "app.log")
     else:
         log_file = str(logs_dir / log_file)
 
-    # 控制台输出格式 (带颜色)
+    # Console output format (with colors)
     console_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
         "<level>{level: <8}</level> | "
@@ -62,7 +62,7 @@ def get_logger(
         "<level>{message}</level>"
     )
 
-    # 文件输出格式 (无颜色)
+    # File output format (without colors)
     file_format = (
         "{time:YYYY-MM-DD HH:mm:ss} | "
         "{level: <8} | "
@@ -70,7 +70,7 @@ def get_logger(
         "{message}"
     )
 
-    # 添加控制台 handler
+    # Add console handler
     loguru_logger.add(
         sys.stderr,
         format=console_format,
@@ -78,7 +78,7 @@ def get_logger(
         colorize=True,
     )
 
-    # 添加文件 handler (支持轮转)
+    # Add file handler (with rotation support)
     loguru_logger.add(
         log_file,
         format=file_format,
@@ -93,5 +93,5 @@ def get_logger(
     return loguru_logger
 
 
-# 全局默认 logger
+# Global default logger
 default_logger = get_logger("github_insight_agent")

@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-分析师 Agent (支持 ReAct 模式)
+Analyst Agent (supports ReAct mode)
 
-功能:
-- 资深技术架构师角色
-- 通过阅读 README 文档快速判断项目的技术价值
-- 提取核心功能、技术栈、解决的痛点
-- 支持 ReAct 模式：Reasoning + Action
-- 具备错误处理和备选方案能力
-- 使用 AgentScope ModelWrapper 进行模型调用
-- 使用 AgentScope Msg 类统一消息格式
-- 继承 AgentScope AgentBase
+Features:
+- Senior technical architect role
+- Quickly evaluates a project's technical value by reading README documentation
+- Extracts core features, tech stack, and pain points addressed
+- Supports ReAct mode: Reasoning + Action
+- Has error handling and fallback capabilities
+- Uses AgentScope ModelWrapper for model calls
+- Uses AgentScope Msg class for unified message format
+- Inherits from AgentScope AgentBase (via GiaAgentBase)
 """
 
 import json
@@ -21,13 +21,12 @@ from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
-from src.core.agentscope_memory import AgentScopeMemory
-from src.core.agentscope_persistent_memory import get_persistent_memory
 from src.core.studio_helper import StudioHelper, set_global_studio_config, forward_to_studio
 from src.tools.github_tool import GitHubTool
 from src.tools.github_toolkit import get_github_toolkit
+from src.agents.base_agent import GiaAgentBase
 
-# 如果启用 tracing，导入装饰器
+# Import trace decorator if tracing is enabled
 try:
     from agentscope.tracing import trace
     TRACING_AVAILABLE = True
@@ -41,39 +40,35 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Studio 配置助手
+# Studio configuration helper
 _studio_helper: Optional[StudioHelper] = None
 
 
 def set_studio_config(studio_url: str, run_id: str) -> None:
-    """设置 Studio 配置并注册 run（使用共享模块）"""
+    """Set Studio configuration and register run (using shared module)"""
     global _studio_helper
     _studio_helper = StudioHelper(studio_url, run_id)
     set_global_studio_config(studio_url, run_id)
     logger.debug(f"Studio config set for run: {run_id}")
 
 
-def _forward_to_studio(name: str, content: str, role: str) -> None:
-    """手动转发消息到 Studio（使用共享模块）"""
-    forward_to_studio(name, content, role)
-
-
-class AnalystAgent:
+class AnalystAgent(GiaAgentBase):
     """
-    分析师 Agent (支持 ReAct 模式)
+    Analyst Agent (supports ReAct mode)
 
-    角色：资深技术架构师，擅长通过阅读文档快速判断项目的技术价值
+    Role: Senior technical architect, skilled at quickly evaluating a project's
+          technical value by reading documentation
 
     Attributes:
-        name: Agent 名称
-        model_name: 使用的模型名称
-        system_prompt: 系统提示词
-        github_tool: GitHub 工具实例
-        config: 配置管理器
-        memory: 对话记忆
+        name: Agent name
+        model_name: Model name used
+        system_prompt: System prompt
+        github_tool: GitHub tool instance
+        config: Configuration manager
+        memory: Conversation memory
     """
 
-    # ReAct 模式的系统提示词模板
+    # ReAct mode system prompt template
     SYSTEM_PROMPT = """你是一个资深技术架构师，擅长通过阅读文档快速判断项目的技术价值。
 
 ## ReAct 模式要求
@@ -169,113 +164,57 @@ class AnalystAgent:
         db_path: str = "data/app.db",
     ):
         """
-        初始化分析师 Agent
+        Initialize the Analyst Agent
 
         Args:
-            name: Agent 名称
-            model_name: 模型名称
-            system_prompt: 系统提示词
-            config: 配置管理器
-            use_toolkit: 是否使用 AgentScope Toolkit（默认 True）
-            use_mcp: 是否使用 GitHub MCP Server（默认 True）
-            use_persistent: 是否使用持久化存储（默认 True）
-            db_path: SQLite 数据库路径
+            name: Agent name
+            model_name: Model name
+            system_prompt: System prompt
+            config: Configuration manager
+            use_toolkit: Whether to use AgentScope Toolkit (default: True)
+            use_mcp: Whether to use GitHub MCP Server (default: True)
+            use_persistent: Whether to use persistent storage (default: True)
+            db_path: SQLite database path
         """
-        self.name = name
-        self.model_name = model_name
-        self.config = config or ConfigManager()
-        self.system_prompt = system_prompt or self.SYSTEM_PROMPT
+        super().__init__(
+            name=name,
+            model_name=model_name,
+            system_prompt=system_prompt or self.SYSTEM_PROMPT,
+            config=config,
+            use_persistent=use_persistent,
+            db_path=db_path,
+        )
+
         self.use_toolkit = use_toolkit
         self.use_mcp = use_mcp
-        self.use_persistent = use_persistent
 
-        # 初始化 GitHub 工具
+        # Initialize GitHub tool
         self.github_tool = GitHubTool(config=self.config)
 
-        # 初始化 AgentScope Toolkit（可选）
+        # Initialize AgentScope Toolkit (optional)
         self.toolkit = None
         if use_toolkit:
             self.toolkit = get_github_toolkit(config=self.config, use_mcp=use_mcp)
             logger.info("AgentScope Toolkit initialized with GitHub tools")
 
-        # 对话记忆（持久化或内存）
-        if use_persistent:
-            self.memory = get_persistent_memory(db_path=db_path)
-            logger.info(f"PersistentMemory initialized (db={db_path})")
-        else:
-            self.memory = AgentScopeMemory(max_messages=10)
-            logger.info("InMemoryMemory initialized (max_messages=10)")
-
-        # AgentScope DashScopeChatModel (懒加载)
-        self._model_wrapper = None
-
         logger.info(f"AnalystAgent '{name}' initialized with model '{model_name}'")
-
-    def _get_model_wrapper(self):
-        """
-        懒加载 AgentScope DashScopeChatModel
-
-        使用 AgentScope 的 DashScopeChatModel 封装模型调用，
-        支持配置驱动的模型初始化和统一的调用接口。
-        """
-        if self._model_wrapper is None:
-            try:
-                from agentscope.model import DashScopeChatModel
-
-                # 获取模型配置
-                model_config = self.config.get_model_config(self.model_name)
-
-                # 创建 DashScopeChatModel
-                self._model_wrapper = DashScopeChatModel(
-                    model_name=self.model_name,
-                    api_key=model_config.get("api_key", self.config.dashscope_api_key),
-                )
-
-                logger.info(f"DashScopeChatModel created for model '{self.model_name}'")
-
-            except ImportError as e:
-                logger.error(f"Failed to import AgentScope DashScopeChatModel: {e}")
-                raise
-            except Exception as e:
-                logger.error(f"Failed to create DashScopeChatModel: {e}")
-                raise
-
-        return self._model_wrapper
-
-    def _add_to_memory(self, role: str, content: str, name: Optional[str] = None) -> None:
-        """
-        添加消息到记忆 (使用 AgentScope InMemoryMemory)
-
-        Args:
-            role: 角色 (user/assistant/system)
-            content: 消息内容
-            name: 发送者名称
-        """
-        self.memory.add_message(
-            role=role,
-            content=content,
-            name=name or self.name,
-        )
-
-        # 转发到 Studio
-        _forward_to_studio(name or self.name, content, role)
 
     def _build_messages(self, user_query: str, readme_content: str) -> List[Msg]:
         """
-        构建消息历史 (使用 AgentScope Msg)
+        Build message history (using AgentScope Msg)
 
         Args:
-            user_query: 用户查询
-            readme_content: README 内容
+            user_query: User query
+            readme_content: README content
 
         Returns:
-            Msg 对象列表
+            List of Msg objects
         """
         messages = [
             Msg(name="system", content=self.system_prompt, role="system"),
         ]
 
-        # 构建分析请求
+        # Build analysis request
         analysis_request = f"""
 请分析以下 GitHub 项目：
 
@@ -299,19 +238,19 @@ class AnalystAgent:
         repo: str,
     ) -> Dict[str, Any]:
         """
-        分析一个 GitHub 项目 (支持 ReAct 模式)
+        Analyze a GitHub project (supports ReAct mode)
 
         Args:
-            owner: 仓库所有者
-            repo: 仓库名称
+            owner: Repository owner
+            repo: Repository name
 
         Returns:
-            分析结果字典
+            Dictionary of analysis results
         """
         logger.info(f"Analyzing project: {owner}/{repo}")
 
         try:
-            # ReAct Step 1: 思考 - 为什么要获取项目摘要
+            # ReAct Step 1: Think - Why fetch project summary
             react_thoughts = []
             react_thoughts.append(
                 "[Thought] 我将首先获取项目的 README 内容，因为 README 通常包含最全面的项目信息。\n"
@@ -319,7 +258,7 @@ class AnalystAgent:
                 f"[Input] owner={owner}, repo={repo}"
             )
 
-            # 获取项目摘要（包含清洗后的 README）
+            # Get project summary (includes cleaned README)
             project_summary = self.github_tool.get_project_summary(
                 owner=owner,
                 repo=repo,
@@ -328,31 +267,31 @@ class AnalystAgent:
 
             react_thoughts.append(f"[Result] 成功获取项目信息，README 长度：{len(project_summary.get('cleaned_readme_text', ''))} 字符")
 
-            # ReAct Step 2: 检查 README 是否可用，决定是否需要备选方案
+            # ReAct Step 2: Check if README is available, decide if fallback is needed
             readme_content = project_summary.get("cleaned_readme_text", "")
 
             if not readme_content or len(readme_content.strip()) < 100:
-                # README 信息不足，触发备选方案
+                # README is insufficient, trigger fallback
                 react_thoughts.append(
                     "\n[Thought] README 内容过短或为空，需要尝试备选方案获取技术栈信息。\n"
                     "[Action] 尝试读取项目的配置文件 (Cargo.toml, package.json, pyproject.toml 等)"
                 )
 
-                # 尝试读取配置文件
+                # Try to read config files
                 config_info = self._try_read_config_file(owner, repo)
 
                 if config_info:
                     react_thoughts.append(f"[Result] 成功获取配置文件信息：{config_info}")
-                    # 将配置信息补充到项目摘要中
+                    # Append config info to project summary
                     project_summary["config_fallback"] = config_info
                 else:
                     react_thoughts.append("[Result] 配置文件也不可用，将基于项目元数据进行推断")
                     project_summary["config_fallback"] = None
 
-            # 记录 ReAct 思考过程
+            # Record ReAct thinking process
             self._add_to_memory("assistant", "\n".join(react_thoughts))
 
-            # 构建分析请求
+            # Build analysis request
             project_info = f"""
 - 项目名称：{project_summary['full_name']}
 - Star 数量：{project_summary['stars']:,}
@@ -362,20 +301,20 @@ class AnalystAgent:
 - 最后更新：{project_summary['updated_at']}
 """
 
-            # 添加配置文件信息（如果有）
+            # Add config file info (if available)
             if project_summary.get("config_fallback"):
                 project_info += f"\n- 配置文件信息：{project_summary['config_fallback']}\n(注：这是从配置文件推断的信息，因为 README 不可用)"
 
             if not readme_content:
                 readme_content = "README 内容不可用，请基于上述项目元数据进行推断。"
 
-            # 调用 LLM 进行分析
+            # Call LLM for analysis
             analysis_result = self._analyze_with_llm(project_info, readme_content)
 
-            # 添加 ReAct 标记到结果中
+            # Add ReAct markers to results
             analysis_result["react_thoughts"] = react_thoughts
 
-            # 合并结果
+            # Merge results
             result = {
                 "project": project_summary["full_name"],
                 "url": project_summary["html_url"],
@@ -398,26 +337,19 @@ class AnalystAgent:
 
     def _analyze_with_llm(self, project_info: str, readme_content: str) -> Dict[str, Any]:
         """
-        调用 LLM 进行项目分析 (使用 AgentScope ModelWrapper)
+        Call LLM to perform project analysis (using AgentScope DashScopeChatModel)
 
         Args:
-            project_info: 项目基本信息
-            readme_content: README 内容
+            project_info: Basic project information
+            readme_content: README content
 
         Returns:
-            分析结果字典
+            Dictionary of analysis results
         """
         try:
-            import dashscope
-            from dashscope import Generation
+            model_wrapper = self._get_model_wrapper()
 
-            # 使用 dashscope 直接调用（回退到原有实现）
-            config = self.config
-            dashscope.api_key = config.dashscope_api_key
-            if config.dashscope_base_url:
-                dashscope.base_url = config.dashscope_base_url
-
-            # 构建 prompt
+            # Build prompt
             prompt = f"""你是一个资深技术架构师，请深入分析以下 GitHub 项目并提取关键信息。
 
 ## 项目信息
@@ -452,52 +384,17 @@ class AnalystAgent:
 }}
 """
 
-            response = Generation.call(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=config.model_max_tokens,
-            )
+            messages = [
+                {"name": "system", "content": self.system_prompt, "role": "system"},
+                {"name": "user", "content": prompt, "role": "user"},
+            ]
 
-            # 提取响应内容（处理多种响应格式，全部安全访问）
-            content = ""
-            try:
-                if response.status_code == 200 and response.output:
-                    if isinstance(response.output, dict):
-                        content = response.output.get('text', '')
-                        if not content:
-                            content = response.output.get('content', '')
-                    else:
-                        # 对象属性访问
-                        choices = getattr(response.output, 'choices', None)
-                        if choices:
-                            content = choices[0].message.content
-                        else:
-                            text_attr = getattr(response.output, 'text', None)
-                            if text_attr:
-                                content = text_attr
-            except Exception as e:
-                logger.debug(f"Content extraction encountered error: {e}, "
-                             f"status_code={response.status_code}, "
-                             f"code={getattr(response, 'code', None)}, "
-                             f"message={getattr(response, 'message', None)}")
+            response = model_wrapper(messages=messages)
+            content = self._extract_response_text(response)
 
-            # Fallback: 尝试 response.text
-            if not content:
-                try:
-                    content = getattr(response, 'text', '') or ''
-                except Exception:
-                    pass
+            logger.info(f"LLM analysis completed via DashScopeChatModel, response length: {len(content)}")
 
-            if not content:
-                logger.error(f"DashScope API returned empty content: status_code={response.status_code}, "
-                             f"code={getattr(response, 'code', None)}, "
-                             f"message={getattr(response, 'message', None)}, "
-                             f"output_type={type(response.output).__name__}, "
-                             f"output={response.output}")
-
-            logger.info(f"LLM analysis completed via dashscope, response length: {len(content)}")
-
-            # 尝试解析 JSON
+            # Try to parse JSON
             analysis = self._parse_json_response(content)
             return analysis
 
@@ -507,23 +404,21 @@ class AnalystAgent:
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         """
-        解析 LLM 返回的 JSON 响应
+        Parse JSON response returned by LLM
 
         Args:
-            content: LLM 返回的内容
+            content: Content returned by LLM
 
         Returns:
-            解析后的字典
+            Parsed dictionary
         """
-        # 尝试提取 JSON 内容
-        import re
-
-        # 尝试匹配 ```json ... ``` 块
+        # Try to extract JSON content
+        # Try to match ```json ... ``` block
         json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
         if json_match:
             content = json_match.group(1)
         else:
-            # 尝试匹配 {...}
+            # Try to match {...}
             json_match = re.search(r"\{[\s\S]*\}", content)
             if json_match:
                 content = json_match.group(0)
@@ -533,7 +428,7 @@ class AnalystAgent:
             return analysis
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse JSON: {e}")
-            # 返回原始内容
+            # Return raw content
             return {
                 "raw_response": content,
                 "parse_error": str(e),
@@ -541,16 +436,16 @@ class AnalystAgent:
 
     def _try_read_config_file(self, owner: str, repo: str) -> Optional[str]:
         """
-        尝试读取项目的配置文件（当 README 不可用时）
+        Try to read the project's config files (when README is unavailable)
 
         Args:
-            owner: 仓库所有者
-            repo: 仓库名称
+            owner: Repository owner
+            repo: Repository name
 
         Returns:
-            配置文件信息字符串，如果无法读取则返回 None
+            Config file info string, or None if unable to read
         """
-        # 配置文件列表（按优先级）
+        # Config file list (by priority)
         config_files = [
             ("Cargo.toml", self._parse_cargo_toml),
             ("package.json", self._parse_package_json),
@@ -576,15 +471,15 @@ class AnalystAgent:
 
     def _fetch_file_content(self, owner: str, repo: str, path: str) -> Optional[str]:
         """
-        获取指定文件的内容
+        Get the content of a specified file
 
         Args:
-            owner: 仓库所有者
-            repo: 仓库名称
-            path: 文件路径
+            owner: Repository owner
+            repo: Repository name
+            path: File path
 
         Returns:
-            文件内容
+            File content
         """
         import base64
 
@@ -602,11 +497,9 @@ class AnalystAgent:
         return None
 
     def _parse_cargo_toml(self, content: str) -> str:
-        """解析 Cargo.toml"""
-        import re
-
+        """Parse Cargo.toml"""
         lines = []
-        # 提取 [package] 部分
+        # Extract [package] section
         package_match = re.search(r"\[package\]([\s\S]*?)(?:\[|\Z)", content)
         if package_match:
             package_section = package_match.group(1)
@@ -617,7 +510,7 @@ class AnalystAgent:
             if version_match:
                 lines.append(f"version={version_match.group(1)}")
 
-        # 提取 [dependencies]
+        # Extract [dependencies]
         deps_match = re.search(r"\[dependencies\]([\s\S]*?)(?:\[|\Z)", content)
         if deps_match:
             deps_section = deps_match.group(1)
@@ -628,9 +521,8 @@ class AnalystAgent:
         return " | ".join(lines) if lines else "Rust project"
 
     def _parse_package_json(self, content: str) -> str:
-        """解析 package.json"""
+        """Parse package.json"""
         try:
-            import json
             data = json.loads(content)
             name = data.get("name", "unknown")
             version = data.get("version", "unknown")
@@ -640,16 +532,14 @@ class AnalystAgent:
             return "Node.js project"
 
     def _parse_pyproject_toml(self, content: str) -> str:
-        """解析 pyproject.toml"""
-        import re
-
+        """Parse pyproject.toml"""
         lines = []
-        # 提取项目名
+        # Extract project name
         name_match = re.search(r'name\s*=\s*"([^"]+)"', content)
         if name_match:
             lines.append(f"name={name_match.group(1)}")
 
-        # 提取依赖
+        # Extract dependencies
         deps_match = re.findall(r'^( [\w-]+)\s*[=>~]', content, re.MULTILINE)
         if deps_match:
             lines.append(f"deps={', '.join(deps_match[:5])}")
@@ -657,12 +547,12 @@ class AnalystAgent:
         return " | ".join(lines) if lines else "Python project"
 
     def _parse_requirements_txt(self, content: str) -> str:
-        """解析 requirements.txt"""
+        """Parse requirements.txt"""
         deps = []
         for line in content.strip().split("\n"):
             line = line.strip()
             if line and not line.startswith("#"):
-                # 提取包名
+                # Extract package name
                 pkg_match = re.match(r'^([\w-]+)', line)
                 if pkg_match:
                     deps.append(pkg_match.group(1))
@@ -671,16 +561,14 @@ class AnalystAgent:
         return f"deps={', '.join(deps) if deps else 'none'}"
 
     def _parse_go_mod(self, content: str) -> str:
-        """解析 go.mod"""
-        import re
-
+        """Parse go.mod"""
         lines = []
-        # 提取 module 名
+        # Extract module name
         module_match = re.search(r'^module\s+(\S+)', content, re.MULTILINE)
         if module_match:
             lines.append(f"module={module_match.group(1)}")
 
-        # 提取依赖
+        # Extract dependencies
         deps = re.findall(r'^\t(\S+)\s+v', content, re.MULTILINE)
         if deps:
             lines.append(f"deps={', '.join(deps[:5])}")
@@ -688,16 +576,14 @@ class AnalystAgent:
         return " | ".join(lines) if lines else "Go project"
 
     def _parse_pom_xml(self, content: str) -> str:
-        """解析 pom.xml"""
-        import re
-
+        """Parse pom.xml"""
         lines = []
-        # 提取 artifactId
+        # Extract artifactId
         artifact_match = re.search(r'<artifactId>([^<]+)</artifactId>', content)
         if artifact_match:
             lines.append(f"artifact={artifact_match.group(1)}")
 
-        # 提取 groupId
+        # Extract groupId
         group_match = re.search(r'<groupId>([^<]+)</groupId>', content)
         if group_match:
             lines.append(f"group={group_match.group(1)}")
@@ -709,13 +595,13 @@ class AnalystAgent:
         projects: List[Dict[str, str]],
     ) -> List[Dict[str, Any]]:
         """
-        批量分析多个项目
+        Batch analyze multiple projects
 
         Args:
-            projects: 项目列表，每项包含 owner 和 repo
+            projects: List of projects, each containing owner and repo
 
         Returns:
-            分析结果列表
+            List of analysis results
         """
         results = []
         for i, project in enumerate(projects, 1):
@@ -729,7 +615,7 @@ class AnalystAgent:
         return results
 
     def get_status(self) -> Dict[str, Any]:
-        """获取 Agent 状态"""
+        """Get Agent status"""
         status = {
             "name": self.name,
             "model": self.model_name,
@@ -745,36 +631,36 @@ class AnalystAgent:
 
     def get_description(self) -> str:
         """
-        获取 AnalystAgent 描述
+        Get AnalystAgent description
 
         Returns:
-            Agent 描述字符串
+            Agent description string
         """
         return "资深技术架构师，擅长通过阅读 README 文档快速判断项目的技术价值。"
 
     def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
         """
-        响应用户消息
+        Respond to user message
 
         Args:
-            msg: 输入消息 (Msg 对象或字符串)
-            *args: 其他参数
-            **kwargs: 关键字参数
+            msg: Input message (Msg object or string)
+            *args: Other arguments
+            **kwargs: Keyword arguments
 
         Returns:
-            响应消息
+            Response message
         """
-        # 如果是字符串，转换为 Msg
+        # If it's a string, convert to Msg
         if isinstance(msg, str):
             msg = Msg(name="user", content=msg, role="user")
 
-        # 记录用户消息
+        # Record user message
         self._add_to_memory("user", msg.content)
 
-        # 调用分析逻辑（这里需要根据实际情况调整）
+        # Call analysis logic (to be adjusted based on actual situation)
         response_content = self.get_description()
 
-        # 创建响应
+        # Create response
         response = Msg(name=self.name, content=response_content, role="assistant")
         self._add_to_memory("assistant", response_content)
 

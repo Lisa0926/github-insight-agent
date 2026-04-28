@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-交互式 CLI - 增强版
+Interactive CLI - Enhanced Version
 
-提供:
-- 命令自动补全
-- 历史命令记录
-- 友好的输入提示
-- 彩色输出
+Provides:
+- Command auto-completion
+- Command history recording
+- Friendly input prompts
+- Colored output
 """
 
 from pathlib import Path
 from typing import Optional
 
-# 检查并导入 prompt_toolkit
+# Check and import prompt_toolkit
 try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import Completer, Completion
@@ -25,7 +25,7 @@ except ImportError:
 
 
 class CommandCompleter(Completer):
-    """命令自动补全"""
+    """Command auto-completion"""
 
     COMMANDS = [
         "/analyze",
@@ -72,14 +72,14 @@ class CommandCompleter(Completer):
 
 
 class InteractiveCLI:
-    """交互式 CLI 管理器"""
+    """Interactive CLI manager"""
 
     def __init__(self, history_file: Optional[str] = None):
         self.session = None
         self.history_file = history_file
 
         if PROMPT_TOOLKIT_AVAILABLE:
-            # 设置历史文件
+            # Set up history file
             if history_file:
                 history_path = Path(history_file)
                 history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +87,7 @@ class InteractiveCLI:
             else:
                 history = None
 
-            # 创建会话
+            # Create session
             self.session = PromptSession(
                 completer=CommandCompleter(),
                 history=history,
@@ -98,7 +98,7 @@ class InteractiveCLI:
             )
 
     def _create_key_bindings(self) -> KeyBindings:
-        """创建快捷键绑定"""
+        """Create keyboard shortcut bindings"""
         if not PROMPT_TOOLKIT_AVAILABLE:
             return None
 
@@ -106,18 +106,18 @@ class InteractiveCLI:
 
         @bindings.add("c-q")
         def exit_(event):
-            """Ctrl+Q 退出"""
+            """Ctrl+Q to exit"""
             event.app.exit(exception=EOFError())
 
         @bindings.add("c-c")
         def interrupt_(event):
-            """Ctrl+C 中断"""
+            """Ctrl+C to interrupt"""
             event.app.exit(exception=KeyboardInterrupt())
 
         return bindings
 
     def get_input(self, prompt: str = "👤 您：") -> Optional[str]:
-        """获取用户输入"""
+        """Get user input"""
         try:
             if self.session and PROMPT_TOOLKIT_AVAILABLE:
                 return self.session.prompt(prompt)
@@ -129,11 +129,11 @@ class InteractiveCLI:
             raise
 
     def clear_input_buffer(self):
-        """清除输入缓冲"""
+        """Clear input buffer"""
         pass
 
 
-# 全局 CLI 实例
+# Global CLI instance
 cli = InteractiveCLI(
     history_file=str(Path.home() / ".github-insight-agent" / "cli_history.txt")
 )

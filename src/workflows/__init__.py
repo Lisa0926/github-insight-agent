@@ -1,6 +1,7 @@
 # Workflows module
-"""工作流模块：定义多步骤自动化流程"""
+"""Workflow module: defines multi-step automated pipelines"""
 
 from .report_generator import ReportGenerator
+from .agent_pipeline import AgentPipeline
 
-__all__ = ["ReportGenerator"]
+__all__ = ["ReportGenerator", "AgentPipeline"]

@@ -1,5 +1,5 @@
 # Agents module
-"""智能体模块：定义各类情报分析智能体"""
+"""Agent module: defines various intelligence analysis agents"""
 
 from .base_agent import BaseAgent
 from .researcher_agent import ResearcherAgent

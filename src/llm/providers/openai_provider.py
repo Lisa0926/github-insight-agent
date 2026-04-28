@@ -2,7 +2,7 @@
 """
 OpenAI Provider
 
-实现 OpenAI LLM 提供商。
+Implements the OpenAI LLM provider.
 """
 
 from typing import Any, Dict, List, Optional
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 class OpenAIProvider(LLMProvider):
     """
-    OpenAI LLM 提供商
+    OpenAI LLM provider
     """
 
     def __init__(
@@ -25,12 +25,12 @@ class OpenAIProvider(LLMProvider):
         base_url: Optional[str] = None,
     ):
         """
-        初始化 OpenAI Provider
+        Initialize OpenAI Provider
 
         Args:
-            api_key: API Key（不传则从环境变量读取）
-            model: 默认模型名称
-            base_url: 自定义 API 基础 URL（用于兼容其他 OpenAI 格式 API）
+            api_key: API Key (read from environment variable if not provided)
+            model: Default model name
+            base_url: Custom API base URL (for compatibility with other OpenAI-format APIs)
         """
         self.api_key = api_key
         self.model = model
@@ -41,17 +41,17 @@ class OpenAIProvider(LLMProvider):
         return "openai"
 
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """同步聊天方法"""
+        """Synchronous chat method"""
         try:
             from openai import OpenAI
 
-            # 创建客户端
+            # Create client
             client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
             )
 
-            # 调用模型
+            # Call the model
             response = client.chat.completions.create(
                 model=kwargs.get("model", self.model),
                 messages=messages,
@@ -59,7 +59,7 @@ class OpenAIProvider(LLMProvider):
                 temperature=kwargs.get("temperature", 0.7),
             )
 
-            # 提取响应
+            # Extract response
             content = response.choices[0].message.content or ""
             logger.debug(f"OpenAI response length: {len(content)}")
             return content
@@ -69,17 +69,17 @@ class OpenAIProvider(LLMProvider):
             raise
 
     async def chat_async(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """异步聊天方法"""
+        """Asynchronous chat method"""
         try:
             from openai import AsyncOpenAI
 
-            # 创建异步客户端
+            # Create async client
             client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
             )
 
-            # 调用模型
+            # Call the model
             response = await client.chat.completions.create(
                 model=kwargs.get("model", self.model),
                 messages=messages,
@@ -87,7 +87,7 @@ class OpenAIProvider(LLMProvider):
                 temperature=kwargs.get("temperature", 0.7),
             )
 
-            # 提取响应
+            # Extract response
             content = response.choices[0].message.content or ""
             logger.debug(f"OpenAI async response length: {len(content)}")
             return content

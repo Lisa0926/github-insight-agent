@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Ollama Provider (本地部署)
+Ollama Provider (local deployment)
 
-实现 Ollama 本地 LLM 部署提供商。
+Implements the Ollama local LLM deployment provider.
 """
 
 from typing import Any, Dict, List
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 class OllamaProvider(LLMProvider):
     """
-    Ollama LLM 提供商（本地部署）
+    Ollama LLM provider (local deployment)
     """
 
     def __init__(
@@ -24,11 +24,11 @@ class OllamaProvider(LLMProvider):
         base_url: str = "http://localhost:11434",
     ):
         """
-        初始化 Ollama Provider
+        Initialize Ollama Provider
 
         Args:
-            model: 默认模型名称
-            base_url: Ollama 服务器地址
+            model: Default model name
+            base_url: Ollama server address
         """
         self.model = model
         self.base_url = base_url
@@ -38,11 +38,11 @@ class OllamaProvider(LLMProvider):
         return "ollama"
 
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """同步聊天方法"""
+        """Synchronous chat method"""
         try:
             import requests
 
-            # 转换消息格式为 Ollama 格式
+            # Convert message format to Ollama format
             ollama_messages = []
             for msg in messages:
                 ollama_messages.append({
@@ -50,7 +50,7 @@ class OllamaProvider(LLMProvider):
                     "content": msg.get("content", ""),
                 })
 
-            # 调用 Ollama API
+            # Call Ollama API
             response = requests.post(
                 f"{self.base_url}/api/chat",
                 json={
@@ -66,7 +66,7 @@ class OllamaProvider(LLMProvider):
             )
             response.raise_for_status()
 
-            # 提取响应
+            # Extract response
             result = response.json()
             content = result.get("message", {}).get("content", "")
             logger.debug(f"Ollama response length: {len(content)}")
@@ -77,11 +77,11 @@ class OllamaProvider(LLMProvider):
             raise
 
     async def chat_async(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """异步聊天方法"""
+        """Asynchronous chat method"""
         import aiohttp
 
         try:
-            # 转换消息格式
+            # Convert message format
             ollama_messages = []
             for msg in messages:
                 ollama_messages.append({
@@ -113,5 +113,5 @@ class OllamaProvider(LLMProvider):
             raise
 
     def get_available_models(self) -> List[str]:
-        # 实际可用模型需要从 Ollama 服务器获取
+        # Actual available models must be fetched from the Ollama server
         return ["llama2", "llama3", "mistral", "mixtral", "qwen", "qwen2"]

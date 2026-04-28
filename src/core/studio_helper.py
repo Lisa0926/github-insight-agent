@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-AgentScope Studio 配置共享模块
+AgentScope Studio configuration sharing module
 
-功能:
-- 提取 ResearcherAgent 和 AnalystAgent 中重复的 Studio 配置逻辑
-- 提供统一的 Studio 消息转发接口
-- 支持 run 注册和消息推送
+Features:
+- Extract repeated Studio configuration logic from ResearcherAgent and AnalystAgent
+- Provide unified Studio message forwarding interface
+- Support run registration and message push
 
-使用示例:
+Usage example:
     from src.core.studio_helper import StudioHelper
 
     helper = StudioHelper(studio_url, run_id)
@@ -27,24 +27,24 @@ logger = get_logger(__name__)
 
 class StudioHelper:
     """
-    AgentScope Studio 配置助手
+    AgentScope Studio configuration helper
 
-    提供 Studio 相关的公共功能:
-    - Run 注册
-    - 消息转发
+    Provides common Studio-related features:
+    - Run registration
+    - Message forwarding
 
     Attributes:
-        studio_url: Studio 服务器 URL
-        run_id: 运行 ID
+        studio_url: Studio server URL
+        run_id: Run ID
     """
 
     def __init__(self, studio_url: Optional[str] = None, run_id: Optional[str] = None):
         """
-        初始化 Studio 助手
+        Initialize Studio helper
 
         Args:
-            studio_url: Studio 服务器 URL
-            run_id: 运行 ID
+            studio_url: Studio server URL
+            run_id: Run ID
         """
         self.studio_url = studio_url
         self.run_id = run_id
@@ -56,15 +56,15 @@ class StudioHelper:
         status: str = "running",
     ) -> bool:
         """
-        注册 run 到 Studio
+        Register run to Studio
 
         Args:
-            project: 项目名称
-            name: run 名称（默认为 run_id）
-            status: run 状态
+            project: Project name
+            name: Run name (defaults to run_id)
+            status: Run status
 
         Returns:
-            注册是否成功
+            Whether registration was successful
         """
         if not self.studio_url or not self.run_id:
             logger.debug("Studio not configured, skipping run registration")
@@ -100,16 +100,16 @@ class StudioHelper:
         reply_id: Optional[str] = None,
     ) -> bool:
         """
-        转发消息到 Studio
+        Forward message to Studio
 
         Args:
-            name: 发送者名称
-            content: 消息内容
-            role: 角色 (user/assistant/system/tool)
-            reply_id: 回复 ID（默认为 name）
+            name: Sender name
+            content: Message content
+            role: Role (user/assistant/system/tool)
+            reply_id: Reply ID (defaults to name)
 
         Returns:
-            转发是否成功
+            Whether forwarding was successful
         """
         if not self.studio_url or not self.run_id:
             return False
@@ -141,7 +141,7 @@ class StudioHelper:
             return False
 
 
-# 全局 Studio 配置（用于兼容旧的 API）
+# Global Studio configuration (for backward compatibility with old API)
 _studio_url: Optional[str] = None
 _run_id: Optional[str] = None
 _studio_helper: Optional[StudioHelper] = None
@@ -149,30 +149,30 @@ _studio_helper: Optional[StudioHelper] = None
 
 def set_global_studio_config(studio_url: Optional[str], run_id: Optional[str]) -> None:
     """
-    设置全局 Studio 配置（兼容旧 API）
+    Set global Studio configuration (backward compatible with old API)
 
     Args:
-        studio_url: Studio 服务器 URL
-        run_id: 运行 ID
+        studio_url: Studio server URL
+        run_id: Run ID
     """
     global _studio_url, _run_id, _studio_helper
     _studio_url = studio_url
     _run_id = run_id
     _studio_helper = StudioHelper(studio_url, run_id)
 
-    # 自动注册 run
+    # Auto-register run
     if studio_url and run_id:
         _studio_helper.register_run()
 
 
 def forward_to_studio(name: str, content: str, role: str) -> None:
     """
-    转发消息到 Studio（兼容旧 API）
+    Forward message to Studio (backward compatible with old API)
 
     Args:
-        name: 发送者名称
-        content: 消息内容
-        role: 角色
+        name: Sender name
+        content: Message content
+        role: Role
     """
     if _studio_helper:
         _studio_helper.forward_message(name, content, role)
@@ -180,9 +180,9 @@ def forward_to_studio(name: str, content: str, role: str) -> None:
 
 def get_studio_helper() -> Optional[StudioHelper]:
     """
-    获取全局 Studio 助手实例
+    Get global Studio helper instance
 
     Returns:
-        StudioHelper 实例或 None
+        StudioHelper instance or None
     """
     return _studio_helper

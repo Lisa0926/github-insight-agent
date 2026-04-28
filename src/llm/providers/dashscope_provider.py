@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-DashScope Provider (阿里云百炼)
+DashScope Provider (Alibaba Cloud Bailian)
 
-实现阿里云百炼 LLM 提供商。
+Implements the Alibaba Cloud Bailian LLM provider.
 """
 
 import asyncio
@@ -16,16 +16,16 @@ logger = get_logger(__name__)
 
 class DashScopeProvider(LLMProvider):
     """
-    DashScope (阿里云百炼) LLM 提供商
+    DashScope (Alibaba Cloud Bailian) LLM provider
     """
 
     def __init__(self, api_key: Optional[str] = None, model: str = "qwen-max"):
         """
-        初始化 DashScope Provider
+        Initialize DashScope Provider
 
         Args:
-            api_key: API Key（不传则从环境变量读取）
-            model: 默认模型名称
+            api_key: API Key (read from environment variable if not provided)
+            model: Default model name
         """
         self.api_key = api_key
         self.model = model
@@ -35,16 +35,16 @@ class DashScopeProvider(LLMProvider):
         return "dashscope"
 
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """同步聊天方法"""
+        """Synchronous chat method"""
         try:
             import dashscope
             from dashscope import Generation
 
-            # 设置 API Key
+            # Set API Key
             if self.api_key:
                 dashscope.api_key = self.api_key
 
-            # 调用模型
+            # Call the model
             response = Generation.call(
                 model=kwargs.get("model", self.model),
                 messages=messages,
@@ -52,7 +52,7 @@ class DashScopeProvider(LLMProvider):
                 temperature=kwargs.get("temperature", 0.7),
             )
 
-            # 提取响应
+            # Extract response
             content = self._extract_content(response)
             logger.debug(f"DashScope response length: {len(content)}")
             return content
@@ -62,7 +62,7 @@ class DashScopeProvider(LLMProvider):
             raise
 
     async def chat_async(self, messages: List[Dict[str, Any]], **kwargs) -> str:
-        """异步聊天方法"""
+        """Asynchronous chat method"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
@@ -70,7 +70,7 @@ class DashScopeProvider(LLMProvider):
         )
 
     def _extract_content(self, response) -> str:
-        """提取响应内容"""
+        """Extract response content"""
         if hasattr(response, "output") and response.output:
             output_dict = response.output if isinstance(response.output, dict) else {}
             content = output_dict.get("text", "")

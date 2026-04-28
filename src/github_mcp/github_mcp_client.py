@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-GitHub MCP Client - AgentScope 集成
+GitHub MCP Client - AgentScope Integration
 
-功能:
-- 使用 AgentScope StdIOStatefulClient 连接 GitHub MCP Server
-- 支持工具列表获取和调用
-- 与现有 Toolkit 集成
+Features:
+- Connect to GitHub MCP Server using AgentScope StdIOStatefulClient
+- Supports tool listing and invocation
+- Integrates with existing Toolkit
 """
 
 import asyncio
@@ -21,13 +21,13 @@ logger = get_logger(__name__)
 
 class GitHubMCPClient(StdIOStatefulClient):
     """
-    GitHub MCP 客户端
+    GitHub MCP client
 
-    通过 StdIO 协议与 GitHub MCP Server 通信
+    Communicates with GitHub MCP Server via StdIO protocol
 
     Args:
         github_token: GitHub Personal Access Token
-        bin_path: github-mcp-server 二进制文件路径
+        bin_path: github-mcp-server binary file path
     """
 
     def __init__(
@@ -39,7 +39,7 @@ class GitHubMCPClient(StdIOStatefulClient):
         self._config = config or ConfigManager()
         self._token = github_token or self._config.github_token
 
-        # 使用配置的 bin 路径或环境变量
+        # Use configured bin path or environment variable
         if bin_path is None:
             bin_path = os.environ.get(
                 "GITHUB_MCP_SERVER_BIN",
@@ -50,11 +50,11 @@ class GitHubMCPClient(StdIOStatefulClient):
         if not self._token:
             raise ValueError("GitHub Token is required for MCP client")
 
-        # 初始化 StdIO 客户端 - 需要使用 stdio 子命令
+        # Initialize StdIO client - requires stdio subcommand
         super().__init__(
             name="github_mcp",
             command=bin_path,
-            args=["stdio"],  # 使用 stdio 子命令
+            args=["stdio"],  # Use stdio subcommand
             env={"GITHUB_PERSONAL_ACCESS_TOKEN": self._token},
         )
 
@@ -62,18 +62,18 @@ class GitHubMCPClient(StdIOStatefulClient):
 
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """
-        获取 MCP Server 可用的工具列表
+        Get list of available tools from MCP Server
 
         Returns:
-            工具描述字典列表
+            List of tool description dictionaries
         """
-        # StdIOStatefulClient 会自动在连接时获取工具列表
-        # 通过 get_callable_function 可以获取每个工具的 callable 函数
+        # StdIOStatefulClient automatically retrieves the tool list on connect
+        # Each tool's callable can be obtained via get_callable_function
         return []
 
     def is_connected(self) -> bool:
-        """检查是否已连接到 MCP Server"""
-        # 检查底层连接状态
+        """Check if connected to MCP Server"""
+        # Check underlying connection status
         return hasattr(self, '_session') and self._session is not None
 
 
@@ -83,15 +83,15 @@ def create_github_mcp_client(
     bin_path: Optional[str] = None,
 ) -> GitHubMCPClient:
     """
-    创建 GitHub MCP 客户端实例
+    Create a GitHub MCP client instance
 
     Args:
-        config: 配置管理器
-        github_token: GitHub Token（可选，从配置或环境变量读取）
-        bin_path: MCP Server 二进制路径
+        config: Configuration manager
+        github_token: GitHub Token (optional, read from config or environment)
+        bin_path: MCP Server binary path
 
     Returns:
-        GitHubMCPClient 实例
+        GitHubMCPClient instance
     """
     config = config or ConfigManager()
     token = github_token or config.github_token
@@ -100,7 +100,7 @@ def create_github_mcp_client(
         logger.warning("No GitHub token configured, MCP client will not be initialized")
         return None
 
-    # 默认 bin 路径（使用环境变量或相对路径）
+    # Default bin path (use environment variable or relative path)
     if bin_path is None:
         bin_path = os.environ.get(
             "GITHUB_MCP_SERVER_BIN",
@@ -121,7 +121,7 @@ def create_github_mcp_client(
 
 
 def _run_async(coro):
-    """运行异步协程"""
+    """Run an async coroutine"""
     try:
         asyncio.get_running_loop()
         raise RuntimeError("_run_async cannot be called from a running event loop")
@@ -141,28 +141,28 @@ def register_github_mcp_tools(
     group_name: str = "github_mcp",
 ) -> int:
     """
-    将 MCP 工具注册到 Toolkit
+    Register MCP tools to a Toolkit
 
     Args:
-        toolkit: AgentScope Toolkit 实例
-        client: GitHub MCP Client 实例
-        group_name: 工具组名称
+        toolkit: AgentScope Toolkit instance
+        client: GitHub MCP Client instance
+        group_name: Tool group name
 
     Returns:
-        注册的工具数量
+        Number of registered tools
     """
     try:
-        # 连接并注册 MCP 客户端到 Toolkit (异步方法)
+        # Connect and register MCP client to Toolkit (async method)
         async def _connect_and_register():
-            # 先连接
+            # First connect
             await client.connect()
-            # 再注册
+            # Then register
             await toolkit.register_mcp_client(client, group_name=group_name)
 
         _run_async(_connect_and_register())
         logger.info(f"GitHub MCP tools registered to group '{group_name}'")
 
-        # 获取注册的工具数量
+        # Get number of registered tools
         schemas = toolkit.get_json_schemas()
         mcp_count = sum(1 for s in schemas if 'github' in s.get('function', {}).get('name', '').lower())
         return mcp_count

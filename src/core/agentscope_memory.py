@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-AgentScope Memory 封装层
+AgentScope Memory wrapper layer
 
-功能:
-- 基于 AgentScope InMemoryMemory 实现短期记忆
-- 支持消息标记 (marks) 用于压缩和过滤
-- 提供同步接口（内部处理异步）
-- 与现有 ConversationManager API 兼容
+Features:
+- Short-term memory based on AgentScope InMemoryMemory
+- Supports message marks for compression and filtering
+- Provides synchronous interface (handles async internally)
+- Compatible with existing ConversationManager API
 """
 
 import asyncio
@@ -23,15 +23,15 @@ logger = get_logger(__name__)
 
 class AgentScopeMemory:
     """
-    AgentScope Memory 封装层
+    AgentScope Memory wrapper layer
 
-    提供同步接口来使用 AgentScope 的 InMemoryMemory，
-    支持消息标记、记忆压缩等功能。
+    Provides synchronous interface to use AgentScope's InMemoryMemory,
+    supporting message marks, memory compression, and more.
 
     Attributes:
-        memory: AgentScope InMemoryMemory 实例
-        max_messages: 最大消息数量阈值，超过后触发压缩
-        compressed_summary: 压缩后的摘要
+        memory: AgentScope InMemoryMemory instance
+        max_messages: Maximum message count threshold, triggers compression when exceeded
+        compressed_summary: Compressed summary
     """
 
     DEFAULT_MAX_MESSAGES = 10
@@ -41,10 +41,10 @@ class AgentScopeMemory:
         max_messages: int = DEFAULT_MAX_MESSAGES,
     ):
         """
-        初始化 AgentScope Memory
+        Initialize AgentScope Memory
 
         Args:
-            max_messages: 最大消息数量阈值
+            max_messages: Maximum message count threshold
         """
         self.memory = InMemoryMemory()
         self.max_messages = max_messages
@@ -53,7 +53,7 @@ class AgentScopeMemory:
         logger.info(f"AgentScopeMemory initialized (max_messages={max_messages})")
 
     def _run_async(self, coro):
-        """运行异步协程"""
+        """Run an async coroutine"""
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -70,14 +70,14 @@ class AgentScopeMemory:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        添加一条消息到记忆
+        Add a message to memory
 
         Args:
-            role: 角色 (user/assistant/tool/system)
-            content: 消息内容
-            name: 发送者名称
-            mark: 消息标记（用于过滤和压缩）
-            metadata: 元数据
+            role: Role (user/assistant/tool/system)
+            content: Message content
+            name: Sender name
+            mark: Message mark (for filtering and compression)
+            metadata: Metadata
         """
         msg = Msg(
             name=name,
@@ -88,17 +88,17 @@ class AgentScopeMemory:
 
         self._run_async(self.memory.add(msg))
 
-        # 如果提供了 mark，更新消息标记
+        # If mark is provided, update message marks
         if mark:
             self._run_async(self.memory.update_messages_mark(mark))
 
         logger.debug(f"Added {role} message to memory (total: {self.size()})")
 
-        # 检查是否需要压缩
+        # Check if compression is needed
         self._check_and_compress()
 
     def add_user_message(self, content: str) -> None:
-        """添加用户消息"""
+        """Add a user message"""
         self.add_message("user", content, name="user")
 
     def add_assistant_message(
@@ -107,7 +107,7 @@ class AgentScopeMemory:
         name: str = "assistant",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """添加助手消息"""
+        """Add an assistant message"""
         self.add_message("assistant", content, name=name, metadata=metadata)
 
     def add_tool_result(
@@ -116,7 +116,7 @@ class AgentScopeMemory:
         result: Any,
         name: str = "assistant",
     ) -> None:
-        """添加工具调用结果"""
+        """Add a tool call result"""
         content = f"[{tool_name}] Result: {result if isinstance(result, str) else str(result)}"
         self.add_message(
             "assistant",
@@ -127,24 +127,24 @@ class AgentScopeMemory:
         )
 
     def size(self) -> int:
-        """获取记忆中的消息数量"""
+        """Get message count in memory"""
         return self._run_async(self.memory.size())
 
     def get_memory(self) -> List[Msg]:
-        """获取所有记忆消息"""
+        """Get all memory messages"""
         return self._run_async(self.memory.get_memory())
 
     def get_messages_for_prompt(self) -> List[Dict[str, Any]]:
         """
-        获取用于构建 Prompt 的消息列表
+        Get message list for building the prompt
 
         Returns:
-            消息字典列表，包含 role, content, name 等字段
+            List of message dictionaries with fields role, content, name, etc.
         """
         messages = self.get_memory()
         result = []
 
-        # 先添加摘要（如果有）
+        # Add summary first (if any)
         if self.compressed_summary:
             result.append({
                 "role": "system",
@@ -152,7 +152,7 @@ class AgentScopeMemory:
                 "name": "system",
             })
 
-        # 添加所有消息
+        # Add all messages
         for msg in messages:
             result.append({
                 "role": msg.role,
@@ -164,110 +164,110 @@ class AgentScopeMemory:
         return result
 
     def _check_and_compress(self) -> None:
-        """检查消息数量，超过阈值则压缩"""
+        """Check message count, compress if threshold exceeded"""
         if self.size() > self.max_messages:
             logger.info(f"Memory exceeds {self.max_messages} messages, triggering compression...")
             self._compress_memory()
 
     def _compress_memory(self) -> None:
         """
-        压缩记忆
+        Compress memory
 
-        策略：
-        1. 保留最近的 N 条消息
-        2. 将早期消息总结为摘要
+        Strategy:
+        1. Keep the most recent N messages
+        2. Summarize earlier messages into a summary
         """
         messages = self.get_memory()
 
         if len(messages) <= self.max_messages:
             return
 
-        # 提取需要压缩的消息
-        to_compress = messages[:len(messages) - self.max_messages + 2]  # 保留最近 2 条
+        # Extract messages to compress
+        to_compress = messages[:len(messages) - self.max_messages + 2]  # Keep the most recent 2
 
-        # 生成摘要
+        # Generate summary
         if to_compress:
             self.compressed_summary = self._generate_summary(to_compress)
             logger.info(f"Generated memory summary: {len(self.compressed_summary)} chars")
 
-            # 清除旧消息并保留最近的
+            # Clear old messages and keep the recent ones
             self._run_async(self.memory.clear())
 
-            # 重新添加摘要和最近的消息
+            # Re-add summary and recent messages
             recent_messages = messages[-(self.max_messages - 2):]
             for msg in recent_messages:
                 self._run_async(self.memory.add(msg))
 
     def _generate_summary(self, messages: List[Msg]) -> str:
         """
-        生成记忆摘要
+        Generate a memory summary
 
         Args:
-            messages: 需要压缩的消息列表
+            messages: List of messages to compress
 
         Returns:
-            摘要字符串
+            Summary string
         """
-        summary_parts = ["【历史对话摘要】"]
+        summary_parts = ["【Historical Conversation Summary】"]
 
-        # 统计工具调用
+        # Count tool calls
         tool_calls = [
             msg.metadata.get("tool_name")
             for msg in messages
             if msg.role == "tool" and msg.metadata.get("tool_name")
         ]
         if tool_calls:
-            summary_parts.append(f"调用的工具：{', '.join(set(tool_calls))}")
+            summary_parts.append(f"Tools used: {', '.join(set(tool_calls))}")
 
-        # 提取用户查询
+        # Extract user queries
         user_queries = [
             msg.content[:100]
             for msg in messages
             if msg.role == "user"
         ]
         if user_queries:
-            summary_parts.append(f"用户查询：{' | '.join(user_queries[:3])}")
+            summary_parts.append(f"User queries: {' | '.join(user_queries[:3])}")
 
-        # 提取助手回复
+        # Extract assistant responses
         assistant_responses = [
             msg.content[:200]
             for msg in messages
             if msg.role == "assistant"
         ]
         if assistant_responses:
-            summary_parts.append(f"助手回复：{' | '.join(assistant_responses[:2])}")
+            summary_parts.append(f"Assistant responses: {' | '.join(assistant_responses[:2])}")
 
-        summary_parts.append("【结束】")
+        summary_parts.append("【End】")
         return "\n".join(summary_parts)
 
     def clear(self) -> None:
-        """清空记忆"""
+        """Clear memory"""
         self._run_async(self.memory.clear())
         self.compressed_summary = ""
         logger.info("AgentScopeMemory cleared")
 
     def delete_message(self, msg_id: str) -> None:
-        """删除指定 ID 的消息"""
+        """Delete message with specified ID"""
         self._run_async(self.memory.delete(msg_id))
 
     def delete_by_mark(self, mark: str) -> None:
-        """删除指定标记的所有消息"""
+        """Delete all messages with specified mark"""
         self._run_async(self.memory.delete_by_mark(mark))
 
     def get_state_dict(self) -> Dict[str, Any]:
-        """获取记忆状态字典（用于序列化）"""
+        """Get memory state dictionary (for serialization)"""
         return self._run_async(self.memory.state_dict())
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """从状态字典加载记忆"""
+        """Load memory from state dictionary"""
         self._run_async(self.memory.load_state_dict(state_dict))
 
     def export_to_conversation_manager(self) -> List[Dict[str, Any]]:
         """
-        导出为 ConversationManager 兼容的格式
+        Export in ConversationManager-compatible format
 
         Returns:
-            对话历史列表
+            Conversation history list
         """
         messages = self.get_memory()
         return [

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-LLM Provider 工厂
+LLM Provider factory
 
-根据配置创建相应的 Provider 实例。
+Creates the corresponding Provider instance based on configuration.
 """
 
 from typing import Dict, Optional, Type
@@ -15,7 +15,7 @@ from src.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Provider 注册表
+# Provider registry
 PROVIDER_REGISTRY: Dict[str, Type[LLMProvider]] = {
     "dashscope": DashScopeProvider,
     "openai": OpenAIProvider,
@@ -31,20 +31,20 @@ def get_provider(
     **kwargs,
 ) -> LLMProvider:
     """
-    获取 LLM Provider 实例
+    Get an LLM Provider instance
 
     Args:
-        provider_name: 提供商名称 (dashscope/openai/ollama)
+        provider_name: Provider name (dashscope/openai/ollama)
         api_key: API Key
-        model: 模型名称
-        base_url: 自定义 API 基础 URL
-        **kwargs: 其他参数
+        model: Model name
+        base_url: Custom API base URL
+        **kwargs: Additional parameters
 
     Returns:
-        LLMProvider 实例
+        LLMProvider instance
 
     Raises:
-        ValueError: 不支持的提供商名称
+        ValueError: Unsupported provider name
     """
     provider_class = PROVIDER_REGISTRY.get(provider_name.lower())
 
@@ -54,7 +54,7 @@ def get_provider(
             f"Unsupported provider: {provider_name}. Available: {available}"
         )
 
-    # 构建初始化参数
+    # Build initialization parameters
     init_kwargs = {}
     if api_key:
         init_kwargs["api_key"] = api_key
@@ -69,17 +69,17 @@ def get_provider(
 
 
 def list_available_providers() -> list:
-    """获取可用的提供商列表"""
+    """Get list of available providers"""
     return list(PROVIDER_REGISTRY.keys())
 
 
 def register_provider(name: str, provider_class: Type[LLMProvider]) -> None:
     """
-    注册自定义 Provider
+    Register a custom Provider
 
     Args:
-        name: 提供商名称
-        provider_class: Provider 类
+        name: Provider name
+        provider_class: Provider class
     """
     PROVIDER_REGISTRY[name.lower()] = provider_class
     logger.info(f"Registered provider: {name}")

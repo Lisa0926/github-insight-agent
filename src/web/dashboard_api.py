@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Web 可视化仪表盘 API
+Web visualization dashboard API
 
-功能:
-- 提供 REST API 端点，返回项目分析数据
-- 支持雷达图、统计卡片、历史记录查询
-- 轻量级 FastAPI 实现
+Features:
+- Provides REST API endpoints returning project analysis data
+- Supports radar charts, stat cards, and history queries
+- Lightweight FastAPI implementation
 
-API 端点:
-- GET /api/projects - 获取项目列表
-- GET /api/projects/{owner}/{repo} - 获取单个项目详情
-- GET /api/projects/{owner}/{repo}/quality - 获取质量评分
-- GET /api/dashboard/summary - 获取仪表盘摘要
-- GET /api/radar - 获取竞品对比雷达图数据
+API Endpoints:
+- GET /api/projects - Get project list
+- GET /api/projects/{owner}/{repo} - Get single project details
+- GET /api/projects/{owner}/{repo}/quality - Get quality score
+- GET /api/dashboard/summary - Get dashboard summary
+- GET /api/radar - Get competitor comparison radar chart data
 """
 
 import re
@@ -33,14 +33,14 @@ from src.tools.pr_review_tool import PRReviewer
 logger = get_logger(__name__)
 
 # ===========================================
-# 输入验证
+# Input validation
 # ===========================================
-# GitHub owner/repo 仅允许字母、数字、连字符、下划线和点
+# GitHub owner/repo: allow only alphanumeric characters, hyphens, underscores, and dots
 _OWNER_REPO_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,38}$')
 
 
 def _validate_identifier(value: str, field_name: str) -> str:
-    """验证 owner/repo 等标识符，防止注入攻击"""
+    """Validate identifiers such as owner/repo to prevent injection attacks"""
     if not value:
         raise HTTPException(status_code=400, detail=f"{field_name} 不能为空")
     if len(value) > 39:
@@ -51,7 +51,7 @@ def _validate_identifier(value: str, field_name: str) -> str:
 
 
 # ===========================================
-# FastAPI 应用
+# FastAPI application
 # ===========================================
 
 app = FastAPI(
@@ -60,7 +60,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS 配置 - 限制为本地来源，避免通配符带来的安全风险
+# CORS configuration - restricted to local origins to avoid security risks from wildcards
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8000",
@@ -76,12 +76,12 @@ app.add_middleware(
 )
 
 # ===========================================
-# 数据模型
+# Data models
 # ===========================================
 
 
 class ProjectSummary(BaseModel):
-    """项目摘要"""
+    """Project summary"""
 
     full_name: str
     stars: int
@@ -95,7 +95,7 @@ class ProjectSummary(BaseModel):
 
 
 class QualityReport(BaseModel):
-    """质量评估报告"""
+    """Quality assessment report"""
 
     quality_score: float
     security_score: float
@@ -107,7 +107,7 @@ class QualityReport(BaseModel):
 
 
 class PRReviewRequest(BaseModel):
-    """PR 审查请求"""
+    """PR review request"""
 
     pr_title: str
     pr_description: str = ""
@@ -116,7 +116,7 @@ class PRReviewRequest(BaseModel):
 
 
 class PRReviewReport(BaseModel):
-    """PR 审查报告"""
+    """PR review report"""
 
     pr_title: str
     stats: Dict[str, Any]
@@ -126,7 +126,7 @@ class PRReviewReport(BaseModel):
 
 
 class RadarChartData(BaseModel):
-    """雷达图数据"""
+    """Radar chart data"""
 
     dimensions: List[str]
     gia_scores: List[float]
@@ -135,7 +135,7 @@ class RadarChartData(BaseModel):
 
 
 class DashboardSummary(BaseModel):
-    """仪表盘摘要"""
+    """Dashboard summary"""
 
     total_projects: int
     avg_quality_score: float
@@ -144,7 +144,7 @@ class DashboardSummary(BaseModel):
 
 
 # ===========================================
-# 内存存储（演示用，后续可替换为数据库）
+# In-memory storage (for demo, can be replaced with a database later)
 # ===========================================
 
 _analyzed_projects: Dict[str, Dict[str, Any]] = {}
@@ -152,13 +152,13 @@ _quality_reports: Dict[str, Dict[str, Any]] = {}
 
 
 # ===========================================
-# API 端点
+# API endpoints
 # ===========================================
 
 
 @app.get("/")
 async def root() -> HTMLResponse:
-    """根页面 - 简单的 HTML 仪表盘"""
+    """Root page - simple HTML dashboard"""
     return HTMLResponse(
         content=_get_dashboard_html(),
         media_type="text/html",
@@ -167,10 +167,10 @@ async def root() -> HTMLResponse:
 
 @app.get("/api/dashboard/summary", response_model=DashboardSummary)
 async def get_dashboard_summary():
-    """获取仪表盘摘要"""
+    """Get dashboard summary"""
     total = len(_analyzed_projects)
 
-    # 计算平均评分
+    # Calculate average scores
     quality_scores = [
         p.get("quality_score", 0)
         for p in _analyzed_projects.values()
@@ -209,7 +209,7 @@ async def get_dashboard_summary():
 async def list_projects(
     limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
 ):
-    """获取已分析的项目列表"""
+    """Get list of analyzed projects"""
     projects = list(_analyzed_projects.values())[-limit:]
     return [
         ProjectSummary(
@@ -230,25 +230,25 @@ async def list_projects(
 @app.post("/api/projects/analyze")
 async def analyze_project(owner: str, repo: str, use_llm: bool = True):
     """
-    分析指定 GitHub 项目
+    Analyze a specified GitHub project
 
     Args:
-        owner: 仓库所有者
-        repo: 仓库名称
-        use_llm: 是否使用 LLM 增强评估
+        owner: Repository owner
+        repo: Repository name
+        use_llm: Whether to use LLM-enhanced evaluation
     """
     try:
-        # 输入验证 - 防止注入
+        # Input validation - prevent injection
         owner = _validate_identifier(owner, "owner")
         repo = _validate_identifier(repo, "repo")
 
         config = ConfigManager()
         github_tool = GitHubTool(config=config)
 
-        # 获取项目摘要
+        # Get project summary
         summary = github_tool.get_project_summary(owner, repo)
 
-        # 评估代码质量
+        # Evaluate code quality
         scorer = CodeQualityScorer(config=config)
         quality_result = await scorer.evaluate(
             readme_content=summary.get("cleaned_readme_text", ""),
@@ -263,7 +263,7 @@ async def analyze_project(owner: str, repo: str, use_llm: bool = True):
             use_llm=use_llm,
         )
 
-        # 存储结果
+        # Store results
         key = f"{owner}/{repo}"
         _analyzed_projects[key] = {
             **summary,
@@ -286,7 +286,7 @@ async def analyze_project(owner: str, repo: str, use_llm: bool = True):
 
 @app.get("/api/projects/{owner}/{repo}", response_model=ProjectSummary)
 async def get_project(owner: str, repo: str):
-    """获取指定项目的分析结果"""
+    """Get analysis results for a specified project"""
     key = f"{owner}/{repo}"
     if key not in _analyzed_projects:
         raise HTTPException(status_code=404, detail="项目未分析")
@@ -307,7 +307,7 @@ async def get_project(owner: str, repo: str):
 
 @app.get("/api/projects/{owner}/{repo}/quality", response_model=QualityReport)
 async def get_quality_report(owner: str, repo: str):
-    """获取项目的质量评估报告"""
+    """Get quality assessment report for a project"""
     key = f"{owner}/{repo}"
     if key not in _quality_reports:
         raise HTTPException(status_code=404, detail="质量报告不存在")
@@ -327,22 +327,22 @@ async def get_quality_report(owner: str, repo: str):
 @app.get("/api/radar", response_model=RadarChartData)
 async def get_radar_data():
     """
-    获取竞品对比雷达图数据
+    Get competitor comparison radar chart data
 
-    维度:
-    - AI 深度分析
-    - 代码质量
-    - 测试能力
-    - 可视化
-    - PR 工作流
-    - 部署灵活性
-    - 成本效益
-    - 中文支持
+    Dimensions:
+    - AI deep analysis
+    - Code quality
+    - Testing capability
+    - Visualization
+    - PR workflow
+    - Deployment flexibility
+    - Cost-effectiveness
+    - Chinese support
     """
-    # GIA 评分（基于实际能力）
-    gia_scores = [5, 3, 1, 2, 1, 5, 5, 5]  # 当前 GIA 能力
+    # GIA scores (based on actual capabilities)
+    gia_scores = [5, 3, 1, 2, 1, 5, 5, 5]  # Current GIA capabilities
 
-    # 竞品评分
+    # Competitor scores
     competitors = {
         "CodeRabbit": [4, 3, 1, 2, 5, 1, 3, 1],
         "Qodo": [4, 4, 5, 2, 3, 1, 3, 1],
@@ -370,26 +370,26 @@ async def get_radar_data():
 @app.post("/api/pr/review", response_model=PRReviewReport)
 async def review_pr(request: PRReviewRequest):
     """
-    审查 Pull Request 代码变更
+    Review Pull Request code changes
 
     Args:
-        pr_title: PR 标题
-        pr_description: PR 描述
-        diff_content: git diff 内容
-        use_llm: 是否使用 LLM 增强
+        pr_title: PR title
+        pr_description: PR description
+        diff_content: git diff content
+        use_llm: Whether to use LLM enhancement
 
     Returns:
-        PR 审查报告
+        PR review report
     """
     try:
         config = ConfigManager()
         reviewer = PRReviewer(config=config)
 
-        # 解析 diff
+        # Parse diff
         from src.tools.pr_review_tool import _parse_diff
         changes = _parse_diff(request.diff_content)
 
-        # 执行审查
+        # Execute review
         report = await reviewer.review(
             pr_title=request.pr_title,
             pr_description=request.pr_description,
@@ -397,7 +397,7 @@ async def review_pr(request: PRReviewRequest):
             use_llm=request.use_llm,
         )
 
-        # 获取 LLM 建议
+        # Get LLM suggestion
         approval = report.get("llm_review", {}).get("approval_recommendation", "comment")
 
         return PRReviewReport(
@@ -414,12 +414,12 @@ async def review_pr(request: PRReviewRequest):
 
 
 # ===========================================
-# HTML 仪表盘页面
+# HTML dashboard page
 # ===========================================
 
 
 def _get_dashboard_html() -> str:
-    """生成简单的 HTML 仪表盘页面"""
+    """Generate a simple HTML dashboard page"""
     return """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -543,7 +543,7 @@ def _get_dashboard_html() -> str:
     <div class="container">
         <h1>🚀 GitHub Insight Agent Dashboard</h1>
 
-        <!-- 分析表单 -->
+        <!-- Analysis form -->
         <div class="analyze-form">
             <h3 style="margin-bottom: 15px;">分析新项目</h3>
             <input type="text" id="owner" placeholder="所有者 (如：facebook)">
@@ -554,12 +554,12 @@ def _get_dashboard_html() -> str:
             </label>
         </div>
 
-        <!-- 加载指示器 -->
+        <!-- Loading indicator -->
         <div class="loading" id="loading">
             ⏳ 正在分析项目，请稍候...
         </div>
 
-        <!-- 统计卡片 -->
+        <!-- Statistics cards -->
         <div class="stats-grid">
             <div class="stat-card">
                 <h3>📊 已分析项目</h3>
@@ -575,13 +575,13 @@ def _get_dashboard_html() -> str:
             </div>
         </div>
 
-        <!-- 雷达图 -->
+        <!-- Radar chart -->
         <div class="chart-container">
             <h3 style="margin-bottom: 15px;">🎯 竞品对比雷达图</h3>
             <canvas id="radarChart"></canvas>
         </div>
 
-        <!-- 项目列表 -->
+        <!-- Project list -->
         <div class="projects-table">
             <h3 style="margin-bottom: 15px;">📋 最近分析的项目</h3>
             <table>
@@ -603,7 +603,7 @@ def _get_dashboard_html() -> str:
     </div>
 
     <script>
-        // 加载仪表盘数据
+        // Load dashboard data
         async function loadDashboard() {
             try {
                 const response = await fetch('/api/dashboard/summary');
@@ -613,7 +613,7 @@ def _get_dashboard_html() -> str:
                 document.getElementById('avgQuality').textContent = data.avg_quality_score.toFixed(2) + '/5.0';
                 document.getElementById('avgSecurity').textContent = data.avg_security_score.toFixed(2) + '/5.0';
 
-                // 更新项目列表
+                // Update project list
                 const tbody = document.getElementById('projectsTable');
                 if (data.recent_analyses.length > 0) {
                     tbody.innerHTML = data.recent_analyses.map(p => `
@@ -638,7 +638,7 @@ def _get_dashboard_html() -> str:
             return `<span class="score-badge ${className}">${score.toFixed(1)}</span>`;
         }
 
-        // 分析项目
+        // Analyze project
         async function analyzeProject() {
             const owner = document.getElementById('owner').value.trim();
             const repo = document.getElementById('repo').value.trim();
@@ -662,7 +662,7 @@ def _get_dashboard_html() -> str:
 
                 if (response.ok) {
                     alert(`分析完成！\\n质量评分：${result.quality.quality_score}/5.0\\n安全评分：${result.quality.security_score}/5.0`);
-                    loadDashboard();  // 刷新数据
+                    loadDashboard();  // Refresh data
                 } else {
                     alert(`分析失败：${result.detail}`);
                 }
@@ -673,7 +673,7 @@ def _get_dashboard_html() -> str:
             }
         }
 
-        // 加载雷达图
+        // Load radar chart
         async function loadRadarChart() {
             try {
                 const response = await fetch('/api/radar');
@@ -718,7 +718,7 @@ def _get_dashboard_html() -> str:
             }
         }
 
-        // 页面加载时初始化
+        // Initialize on page load
         loadDashboard();
         loadRadarChart();
     </script>
@@ -728,17 +728,17 @@ def _get_dashboard_html() -> str:
 
 
 # ===========================================
-# 启动服务器
+# Start server
 # ===========================================
 
 
 def run_dashboard(host: str = "0.0.0.0", port: int = 8000):
     """
-    启动仪表盘服务器
+    Start the dashboard server
 
     Args:
-        host: 监听地址
-        port: 端口号
+        host: Listen address
+        port: Port number
     """
     import uvicorn
     uvicorn.run(app, host=host, port=port)

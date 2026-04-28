@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-对话管理器
+Conversation manager
 
-功能:
-- 记录对话历史（User -> Assistant -> Tool Result -> Final Answer）
-- 上下文压缩（超过阈值时自动总结为摘要）
-- 支持多轮对话记忆
+Features:
+- Record conversation history (User -> Assistant -> Tool Result -> Final Answer)
+- Context compression (auto-summarize when threshold exceeded)
+- Support multi-turn conversation memory
 """
 
 import json
@@ -20,22 +20,22 @@ logger = get_logger(__name__)
 
 class ConversationManager:
     """
-    对话管理器
+    Conversation manager
 
-    负责管理多轮对话历史，支持：
-    - 对话记录存储
-    - 上下文压缩（防止 Token 超限）
-    - 对话历史持久化（可选 JSON 文件存储）
-    - 摘要生成和注入
+    Responsible for managing multi-turn conversation history, supports:
+    - Conversation record storage
+    - Context compression (prevents token overflow)
+    - Conversation history persistence (optional JSON file storage)
+    - Summary generation and injection
 
     Attributes:
-        max_turns: 最大对话轮数阈值，超过后触发压缩
-        storage_path: 对话历史存储路径（可选）
-        conversation_history: 对话历史列表
-        summary: 对话摘要
+        max_turns: Maximum conversation turn threshold, triggers compression when exceeded
+        storage_path: Conversation history storage path (optional)
+        conversation_history: Conversation history list
+        summary: Conversation summary
     """
 
-    # 默认对话轮数阈值
+    # Default conversation turn threshold
     DEFAULT_MAX_TURNS = 3
 
     def __init__(
@@ -45,24 +45,24 @@ class ConversationManager:
         auto_save: bool = False,
     ):
         """
-        初始化对话管理器
+        Initialize conversation manager
 
         Args:
-            max_turns: 最大对话轮数阈值，超过后触发压缩
-            storage_path: 对话历史 JSON 文件路径（可选，不传则不持久化）
-            auto_save: 是否每次添加消息后自动保存
+            max_turns: Maximum conversation turn threshold, triggers compression when exceeded
+            storage_path: Conversation history JSON file path (optional, no persistence if not provided)
+            auto_save: Whether to auto-save after each message is added
         """
         self.max_turns = max_turns
         self.storage_path = storage_path
         self.auto_save = auto_save
 
-        # 对话历史：每条消息包含 role, content, timestamp, metadata
+        # Conversation history: each message contains role, content, timestamp, metadata
         self.conversation_history: List[Dict[str, Any]] = []
 
-        # 对话摘要（压缩后的历史）
+        # Conversation summary (compressed history)
         self.summary: str = ""
 
-        # 加载已有历史（如果 storage_path 存在）
+        # Load existing history (if storage_path exists)
         if storage_path and os.path.exists(storage_path):
             self._load_from_file()
 
@@ -78,12 +78,12 @@ class ConversationManager:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        添加一条消息到对话历史
+        Add a message to conversation history
 
         Args:
-            role: 角色名（user/assistant/tool）
-            content: 消息内容
-            metadata: 元数据（可选，如工具调用信息）
+            role: Role name (user/assistant/tool)
+            content: Message content
+            metadata: Metadata (optional, e.g. tool call info)
         """
         message = {
             "role": role,
@@ -95,51 +95,51 @@ class ConversationManager:
         self.conversation_history.append(message)
         logger.debug(f"Added {role} message to conversation (total: {len(self.conversation_history)})")
 
-        # 检查是否需要压缩
+        # Check if compression is needed
         self._check_and_compress()
 
-        # 自动保存
+        # Auto-save
         if self.auto_save:
             self.save_to_file()
 
     def add_user_message(self, content: str) -> None:
-        """添加用户消息"""
+        """Add a user message"""
         self.add_message("user", content)
 
     def add_assistant_message(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """添加助手消息"""
+        """Add an assistant message"""
         self.add_message("assistant", content, metadata)
 
     def add_tool_result(self, tool_name: str, result: Any) -> None:
-        """添加工具调用结果"""
+        """Add a tool call result"""
         content = f"[{tool_name}] Result: {json.dumps(result) if not isinstance(result, str) else result}"
         self.add_message("tool", content, metadata={"tool_name": tool_name, "result": result})
 
     def get_turn_count(self) -> int:
         """
-        获取对话轮数
+        Get conversation turn count
 
         Returns:
-            轮数（user + assistant 为一轮）
+            Turn count (user + assistant = one turn)
         """
         user_count = sum(1 for msg in self.conversation_history if msg["role"] == "user")
         return user_count
 
     def _check_and_compress(self) -> None:
-        """检查对话轮数，超过阈值则压缩"""
+        """Check conversation turn count, compress if threshold exceeded"""
         if self.get_turn_count() > self.max_turns:
             logger.info(f"Conversation exceeds {self.max_turns} turns, triggering compression...")
             self._compress_history()
 
     def _compress_history(self) -> None:
         """
-        压缩对话历史
+        Compress conversation history
 
-        策略：
-        1. 保留最近 N 轮完整对话
-        2. 将早期对话总结为摘要
+        Strategy:
+        1. Keep the most recent N complete turns
+        2. Summarize earlier turns into a summary
         """
-        # 找到最近 max_turns 轮对话的起始位置
+        # Find the starting index of the most recent max_turns turns
         user_indices = [
             i for i, msg in enumerate(self.conversation_history)
             if msg["role"] == "user"
@@ -148,102 +148,102 @@ class ConversationManager:
         if len(user_indices) <= self.max_turns:
             return
 
-        # 计算需要保留的起始索引
+        # Calculate the starting index to keep
         keep_from_index = user_indices[-self.max_turns]
 
-        # 提取需要压缩的历史
+        # Extract history to compress
         to_compress = self.conversation_history[:keep_from_index]
 
-        # 生成摘要
+        # Generate summary
         if to_compress:
             self.summary = self._generate_summary(to_compress)
             logger.info(f"Generated summary: {len(self.summary)} chars")
 
-        # 保留最近的对话
+        # Keep the recent conversation
         self.conversation_history = self.conversation_history[keep_from_index:]
 
     def _generate_summary(self, messages: List[Dict[str, Any]]) -> str:
         """
-        生成对话摘要
+        Generate a conversation summary
 
         Args:
-            messages: 需要压缩的消息列表
+            messages: List of messages to compress
 
         Returns:
-            摘要字符串
+            Summary string
         """
-        # 简单策略：提取关键信息
-        # TODO: 可以调用 LLM 生成更智能的摘要
+        # Simple strategy: extract key information
+        # TODO: Can call LLM for smarter summary generation
 
         summary_parts = []
 
-        # 统计工具调用
+        # Count tool calls
         tool_calls = [
             msg["metadata"].get("tool_name")
             for msg in messages
             if msg["role"] == "tool" and msg["metadata"].get("tool_name")
         ]
         if tool_calls:
-            summary_parts.append(f"调用的工具：{', '.join(set(tool_calls))}")
+            summary_parts.append(f"Tools used: {', '.join(set(tool_calls))}")
 
-        # 提取用户查询主题
+        # Extract user query topics
         user_queries = [
             msg["content"][:100]
             for msg in messages
             if msg["role"] == "user"
         ]
         if user_queries:
-            summary_parts.append(f"用户查询：{' | '.join(user_queries[:3])}")
+            summary_parts.append(f"User queries: {' | '.join(user_queries[:3])}")
 
-        # 提取助手的关键回复
+        # Extract key assistant responses
         assistant_responses = [
             msg["content"][:200]
             for msg in messages
             if msg["role"] == "assistant"
         ]
         if assistant_responses:
-            summary_parts.append(f"助手回复：{' | '.join(assistant_responses[:2])}")
+            summary_parts.append(f"Assistant responses: {' | '.join(assistant_responses[:2])}")
 
-        summary = "【历史对话摘要】\n" + "\n".join(summary_parts) + "\n【结束】\n"
+        summary = "【Historical Conversation Summary】\n" + "\n".join(summary_parts) + "\n【End】\n"
         return summary
 
     def get_context_for_prompt(self) -> str:
         """
-        获取用于注入 Prompt 的上下文
+        Get context for prompt injection
 
         Returns:
-            格式化的上下文字符串（包含摘要和最近对话）
+            Formatted context string (contains summary and recent conversation)
         """
         context_parts = []
 
-        # 如果有摘要，先注入摘要
+        # If there is a summary, inject it first
         if self.summary:
             context_parts.append(self.summary)
 
-        # 添加最近的对话历史
+        # Add recent conversation history
         if self.conversation_history:
             recent_history = []
             for msg in self.conversation_history:
                 role = msg["role"]
                 content = msg["content"]
                 if role == "user":
-                    recent_history.append(f"用户：{content}")
+                    recent_history.append(f"User: {content}")
                 elif role == "assistant":
-                    recent_history.append(f"助手：{content}")
+                    recent_history.append(f"Assistant: {content}")
                 elif role == "tool":
                     tool_name = msg["metadata"].get("tool_name", "tool")
-                    recent_history.append(f"[{tool_name}] 结果：{content[:200]}")
+                    recent_history.append(f"[{tool_name}] Result: {content[:200]}")
 
             context_parts.append("\n".join(recent_history))
 
         return "\n\n".join(context_parts) if context_parts else ""
 
     def get_full_history(self) -> List[Dict[str, Any]]:
-        """获取完整对话历史"""
+        """Get full conversation history"""
         return self.conversation_history.copy()
 
     def clear_history(self) -> None:
-        """清空对话历史"""
+        """Clear conversation history"""
         self.conversation_history.clear()
         self.summary = ""
         logger.info("Conversation history cleared")
@@ -253,10 +253,10 @@ class ConversationManager:
 
     def save_to_file(self) -> bool:
         """
-        保存对话历史到 JSON 文件
+        Save conversation history to JSON file
 
         Returns:
-            是否成功
+            Whether successful
         """
         if not self.storage_path:
             logger.warning("No storage path configured, cannot save")
@@ -269,7 +269,7 @@ class ConversationManager:
                 "last_updated": datetime.now().isoformat(),
             }
 
-            # 确保目录存在
+            # Ensure directory exists
             os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
 
             with open(self.storage_path, "w", encoding="utf-8") as f:
@@ -283,7 +283,7 @@ class ConversationManager:
             return False
 
     def _load_from_file(self) -> None:
-        """从 JSON 文件加载对话历史"""
+        """Load conversation history from JSON file"""
         if not self.storage_path or not os.path.exists(self.storage_path):
             return
 
@@ -301,26 +301,26 @@ class ConversationManager:
 
     def export_markdown(self, output_path: str) -> bool:
         """
-        导出对话为 Markdown 格式
+        Export conversation as Markdown format
 
         Args:
-            output_path: 输出文件路径
+            output_path: Output file path
 
         Returns:
-            是否成功
+            Whether successful
         """
         try:
             lines = [
-                "# 对话记录",
-                f"\n生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                f"对话轮数：{self.get_turn_count()}",
+                "# Conversation Record",
+                f"\nGenerated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Conversation turns: {self.get_turn_count()}",
                 "",
             ]
 
             if self.summary:
-                lines.extend(["## 对话摘要", "", self.summary, ""])
+                lines.extend(["## Conversation Summary", "", self.summary, ""])
 
-            lines.extend(["## 详细对话", ""])
+            lines.extend(["## Detailed Conversation", ""])
 
             for msg in self.conversation_history:
                 role = msg["role"].upper()

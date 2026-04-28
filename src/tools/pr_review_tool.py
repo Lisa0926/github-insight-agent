@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-PR 自动审查工具
+PR automated review tool
 
-功能:
-- 分析 Pull Request 代码变更
-- 检测潜在问题（代码质量、安全、性能）
-- 提供改进建议
-- 生成结构化审查报告
+Features:
+- Analyze Pull Request code changes
+- Detect potential issues (code quality, security, performance)
+- Provide improvement suggestions
+- Generate structured review reports
 
-参考 CodeRabbit 核心能力:
-- 代码变更智能分析
-- 问题自动检测
-- 行级评论建议
-- 审查摘要生成
+Reference CodeRabbit core capabilities:
+- Intelligent code change analysis
+- Automated issue detection
+- Line-level comment suggestions
+- Review summary generation
 """
 
 import re
@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 
 
 class IssueSeverity(Enum):
-    """问题严重程度"""
+    """Issue severity levels"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -39,7 +39,7 @@ class IssueSeverity(Enum):
 
 
 class IssueCategory(Enum):
-    """问题类别"""
+    """Issue categories"""
     CODE_QUALITY = "code_quality"
     SECURITY = "security"
     PERFORMANCE = "performance"
@@ -51,7 +51,7 @@ class IssueCategory(Enum):
 
 @dataclass
 class CodeChange:
-    """代码变更"""
+    """Code change"""
     file_path: str
     hunk_start_line: int
     changes: List[str] = field(default_factory=list)
@@ -61,7 +61,7 @@ class CodeChange:
 
 @dataclass
 class ReviewComment:
-    """审查评论"""
+    """Review comment"""
     file_path: str
     line_number: int
     category: IssueCategory
@@ -73,17 +73,17 @@ class ReviewComment:
 
 class PRReviewer:
     """
-    PR 自动审查器
+    PR automated reviewer
 
-    分析代码变更，检测问题，生成审查意见。
+    Analyzes code changes, detects issues, and generates review comments.
     """
 
-    # OWASP 安全规则引擎（50+ 条规则）
+    # OWASP security rule engine (50+ rules)
     _owasp_engine: Optional[OWASPRuleEngine] = None
 
-    # 代码问题检测规则（非安全类）
+    # Code issue detection rules (non-security)
     PATTERNS = {
-        # 性能问题
+        # Performance issues
         "inefficient_loop": {
             "pattern": r"for\s+\w+\s+in\s+\w+.*:\s*\n\s+for\s+\w+\s+in\s+\w+",
             "category": IssueCategory.PERFORMANCE,
@@ -91,7 +91,7 @@ class PRReviewer:
             "message": "嵌套循环可能导致性能问题",
             "suggestion": "考虑使用列表推导式、字典或算法优化"
         },
-        # 代码质量
+        # Code quality
         "long_function": {
             "pattern": r"def\s+\w+\s*\([^)]*\)\s*:",
             "category": IssueCategory.CODE_QUALITY,
@@ -113,7 +113,7 @@ class PRReviewer:
             "message": "代码中包含 print() 语句",
             "suggestion": "使用 logging 模块替代 print()，生产代码应移除调试输出"
         },
-        # 测试问题
+        # Test issues
         "missing_assert": {
             "pattern": r"def\s+test_\w+\s*\(",
             "category": IssueCategory.TEST,
@@ -121,7 +121,7 @@ class PRReviewer:
             "message": "测试函数可能缺少断言（建议检查）",
             "suggestion": "确保测试包含 assert 语句验证预期结果"
         },
-        # 文档问题
+        # Documentation issues
         "missing_docstring": {
             "pattern": r"(def|class)\s+\w+\s*[^:]*:\s*\n\s+[^\"']",
             "category": IssueCategory.DOCUMENTATION,
@@ -133,17 +133,17 @@ class PRReviewer:
 
     def __init__(self, config: Optional[ConfigManager] = None):
         """
-        初始化 PR 审查器
+        Initialize the PR reviewer
 
         Args:
-            config: 配置管理器实例
+            config: Config manager instance
         """
         self._config = config or ConfigManager()
 
-        # 初始化 OWASP 安全规则引擎
+        # Initialize OWASP security rule engine
         PRReviewer._owasp_engine = OWASPRuleEngine(config=self._config)
 
-        # 初始化 LLM Provider
+        # Initialize LLM Provider
         provider_name = self._config.llm_provider.lower() if hasattr(self._config, 'llm_provider') else 'dashscope'
         api_key = self._config.dashscope_api_key if provider_name == 'dashscope' else None
         model = self._config.dashscope_model_name if provider_name == 'dashscope' else None
@@ -159,31 +159,31 @@ class PRReviewer:
 
     def _detect_issues_by_rules(self, changes: List[CodeChange]) -> List[ReviewComment]:  # noqa: C901
         """
-        基于规则检测代码问题（包括 OWASP 安全规则）
+        Detect code issues based on rules (including OWASP security rules)
 
         Args:
-            changes: 代码变更列表
+            changes: List of code changes
 
         Returns:
-            审查评论列表
+            List of review comments
         """
         issues: List[ReviewComment] = []
 
         for change in changes:
             code_content = "\n".join(change.changes)
 
-            # 1. OWASP 安全规则检测（50+ 条规则）
+            # 1. OWASP security rule detection (50+ rules)
             if PRReviewer._owasp_engine:
                 owasp_issues = PRReviewer._owasp_engine.detect_issues(change.file_path, code_content, change.hunk_start_line)
                 for owasp_issue in owasp_issues:
-                    # 映射 OWASP 严重程度到 PR 审查器
+                    # Map OWASP severity to PR reviewer severity
                     severity_map = {
                         OWASPIssueSeverity.CRITICAL: IssueSeverity.CRITICAL,
                         OWASPIssueSeverity.HIGH: IssueSeverity.HIGH,
                         OWASPIssueSeverity.MEDIUM: IssueSeverity.MEDIUM,
                         OWASPIssueSeverity.LOW: IssueSeverity.LOW,
                     }
-                    # 映射 OWASP 类别到 PR 审查器类别
+                    # Map OWASP category to PR reviewer category
                     category_str = owasp_issue.category.value
                     if "A03" in owasp_issue.owasp_id or "Injection" in category_str:
                         pr_category = IssueCategory.SECURITY
@@ -210,15 +210,15 @@ class PRReviewer:
                     )
                     issues.append(comment)
 
-            # 2. 通用代码质量检测规则
+            # 2. General code quality detection rules
             for rule_name, rule_config in self.PATTERNS.items():
                 matches = re.finditer(rule_config["pattern"], code_content, re.IGNORECASE | re.MULTILINE)
 
                 for match in matches:
-                    # 计算行号
+                    # Calculate line number
                     line_number = change.hunk_start_line + code_content[:match.start()].count('\n')
 
-                    # 创建审查评论
+                    # Create review comment
                     comment = ReviewComment(
                         file_path=change.file_path,
                         line_number=line_number,
@@ -229,7 +229,7 @@ class PRReviewer:
                     )
                     issues.append(comment)
 
-        # 去重（同一位置可能触发多条规则）
+        # Deduplicate (same location may trigger multiple rules)
         seen = set()
         unique_issues = []
         for issue in issues:
@@ -247,15 +247,15 @@ class PRReviewer:
         changes: List[CodeChange],
     ) -> Dict[str, Any]:
         """
-        使用 LLM 进行深度审查
+        Use LLM for in-depth review
 
         Args:
-            pr_title: PR 标题
-            pr_description: PR 描述
-            changes: 代码变更
+            pr_title: PR title
+            pr_description: PR description
+            changes: Code changes
 
         Returns:
-            LLM 审查结果
+            LLM review result
         """
         if self._llm_provider is None:
             logger.warning("LLM provider not available")
@@ -266,20 +266,20 @@ class PRReviewer:
                 "suggestions": [],
             }
 
-        # 构建变更摘要
+        # Build change summary
         changes_summary = []
-        for change in changes[:20]:  # 限制文件数量，避免 token 超限
+        for change in changes[:20]:  # Limit file count to avoid token overflow
             additions = change.additions
             deletions = change.deletions
             changes_summary.append(f"- {change.file_path}: +{additions} -{deletions}")
 
-        # 提取部分代码变更（前 100 行）
+        # Extract partial code changes (first 100 lines)
         code_snippets = []
         total_lines = 0
         for change in changes:
             if total_lines >= 100:
                 break
-            snippet = "\n".join(change.changes[:20])  # 每个文件最多 20 行
+            snippet = "\n".join(change.changes[:20])  # Max 20 lines per file
             code_snippets.append(f"### {change.file_path}\n```diff\n{snippet}\n```")
             total_lines += len(change.changes)
 
@@ -327,7 +327,7 @@ approval_recommendation 可选值:
                 {"role": "user", "content": prompt},
             ])
 
-            # 解析 JSON 响应
+            # Parse JSON response
             json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response)
             if json_match:
                 result = json.loads(json_match.group(1))
@@ -362,28 +362,28 @@ approval_recommendation 可选值:
         use_llm: bool = True,
     ) -> Dict[str, Any]:
         """
-        执行 PR 审查
+        Execute PR review
 
         Args:
-            pr_title: PR 标题
-            pr_description: PR 描述
-            changes: 代码变更列表
-            use_llm: 是否使用 LLM 增强
+            pr_title: PR title
+            pr_description: PR description
+            changes: List of code changes
+            use_llm: Whether to use LLM enhancement
 
         Returns:
-            审查报告
+            Review report
         """
         logger.info(f"Reviewing PR: {pr_title}")
 
-        # 步骤 1: 基于规则的问题检测
+        # Step 1: Rule-based issue detection
         rule_issues = self._detect_issues_by_rules(changes)
 
-        # 步骤 2: LLM 深度审查
+        # Step 2: LLM deep review
         llm_result = {}
         if use_llm:
             llm_result = await self._llm_review(pr_title, pr_description, changes)
 
-        # 步骤 3: 汇总报告
+        # Step 3: Compile report
         stats = {
             "total_files": len(set(c.file_path for c in changes)),
             "total_additions": sum(c.additions for c in changes),
@@ -419,7 +419,7 @@ approval_recommendation 可选值:
         issues: List[ReviewComment],
         llm_result: Dict[str, Any],
     ) -> str:
-        """生成审查摘要"""
+        """Generate review summary"""
         critical_count = sum(1 for i in issues if i.severity == IssueSeverity.CRITICAL)
         high_count = sum(1 for i in issues if i.severity == IssueSeverity.HIGH)
 
@@ -451,27 +451,27 @@ async def review_pull_request(
     config: Optional[ConfigManager] = None,
 ) -> ToolResponse:
     """
-    审查 Pull Request（工具函数）
+    Review a Pull Request (tool function)
 
     Args:
-        pr_title: PR 标题
-        pr_description: PR 描述
-        diff_content: git diff 内容
-        use_llm: 是否使用 LLM 增强
-        config: 配置管理器
+        pr_title: PR title
+        pr_description: PR description
+        diff_content: git diff content
+        use_llm: Whether to use LLM enhancement
+        config: Config manager
 
     Returns:
-        ToolResponse 包装的审查报告
+        Review report wrapped in ToolResponse
     """
     try:
-        # 解析 diff 内容
+        # Parse diff content
         changes = _parse_diff(diff_content)
 
-        # 执行审查
+        # Execute review
         reviewer = PRReviewer(config=config)
         report = await reviewer.review(pr_title, pr_description, changes, use_llm=use_llm)
 
-        # 格式化为人类可读的报告
+        # Format as human-readable report
         report_text = _format_report(report)
 
         return ToolResponse.ok(
@@ -486,13 +486,13 @@ async def review_pull_request(
 
 def _parse_diff(diff_content: str) -> List[CodeChange]:  # noqa: C901
     """
-    解析 git diff 内容为 CodeChange 列表
+    Parse git diff content into a list of CodeChange objects
 
     Args:
-        diff_content: git diff 输出
+        diff_content: git diff output
 
     Returns:
-        CodeChange 列表
+        List of CodeChange objects
     """
     changes: List[CodeChange] = []
     current_file: Optional[CodeChange] = None
@@ -501,7 +501,7 @@ def _parse_diff(diff_content: str) -> List[CodeChange]:  # noqa: C901
     lines = diff_content.split('\n')
 
     for line in lines:
-        # 检测新文件
+        # Detect new file
         if line.startswith('+++ b/') or line.startswith('+++ /dev/null'):
             if current_file is not None:
                 changes.append(current_file)
@@ -509,31 +509,31 @@ def _parse_diff(diff_content: str) -> List[CodeChange]:  # noqa: C901
             file_path = line[6:] if line.startswith('+++ b/') else 'new_file'
             current_file = CodeChange(file_path=file_path, hunk_start_line=0, changes=[])
 
-        # 检测 hunk 头部
+        # Detect hunk header
         elif line.startswith('@@'):
             match = re.search(r'\+(\d+)', line)
             if match and current_file is not None:
                 current_hunk_start = int(match.group(1))
                 current_file.hunk_start_line = current_hunk_start
 
-        # 添加行
+        # Addition line
         elif line.startswith('+') and not line.startswith('+++'):
             if current_file is not None:
-                current_file.changes.append(line[1:])  # 移除 + 前缀
+                current_file.changes.append(line[1:])  # Remove + prefix
                 current_file.additions += 1
 
-        # 删除行
+        # Deletion line
         elif line.startswith('-') and not line.startswith('---'):
             if current_file is not None:
-                current_file.changes.append(line[1:])  # 移除 - 前缀
+                current_file.changes.append(line[1:])  # Remove - prefix
                 current_file.deletions += 1
 
-        # 上下文行
+        # Context line
         elif line.startswith(' '):
             if current_file is not None:
                 current_file.changes.append(line[1:])
 
-    # 添加最后一个文件
+    # Add the last file
     if current_file is not None:
         changes.append(current_file)
 
@@ -541,7 +541,7 @@ def _parse_diff(diff_content: str) -> List[CodeChange]:  # noqa: C901
 
 
 def _format_report(report: Dict[str, Any]) -> str:  # noqa: C901
-    """格式化审查报告为人类可读文本"""
+    """Format review report as human-readable text"""
     lines = [
         "=" * 60,
         "PR 自动审查报告",
@@ -559,7 +559,7 @@ def _format_report(report: Dict[str, Any]) -> str:  # noqa: C901
         "",
     ]
 
-    # LLM 审查结果
+    # LLM review results
     if report.get('llm_review'):
         llm = report['llm_review']
         lines.extend([
@@ -592,7 +592,7 @@ def _format_report(report: Dict[str, Any]) -> str:  # noqa: C901
         lines.append(f"**建议操作**: {llm.get('approval_recommendation', 'comment')}")
         lines.append("")
 
-    # 规则检测问题
+    # Rule-detected issues
     if report.get('rule_based_issues'):
         issues = report['rule_based_issues']
         if issues:
@@ -600,7 +600,7 @@ def _format_report(report: Dict[str, Any]) -> str:  # noqa: C901
                 "## 🔍 规则检测问题",
                 "",
             ])
-            for issue in issues[:10]:  # 最多显示 10 个
+            for issue in issues[:10]:  # Show at most 10
                 severity_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
                     issue['severity'], "⚪"
                 )

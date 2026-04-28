@@ -1,7 +1,7 @@
-# GitHub Insight Agent - 企业级多智能体情报分析系统
+# GitHub Insight Agent - Enterprise-level Multi-Agent Intelligence Analysis System
 """
-GitHub Insight Agent 提供基于阿里云百炼和 AgentScope 的智能体框架，
-用于分析 GitHub 仓库、Issue、PR 等情报数据。
+GitHub Insight Agent provides an agent framework based on Alibaba Cloud Bailian
+and AgentScope for analyzing GitHub repositories, issues, PRs, and other intelligence data.
 """
 
 __version__ = "0.1.0"

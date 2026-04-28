@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-CLI 美化模块
+CLI Beautification Module
 
-提供:
-- 彩色输出
-- Emoji 图标
-- 表格/面板渲染
-- 进度条
-- 友好错误提示
+Provides:
+- Colored output
+- Emoji icons
+- Table/panel rendering
+- Progress bars
+- Friendly error messages
 """
 
 from typing import Any, Dict, List, Optional
 
-# 检查并导入 rich 库
+# Check and import the rich library
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -27,13 +27,13 @@ except ImportError:
 
 
 class CLIRenderer:
-    """CLI 渲染器 - 提供友好的终端输出"""
+    """CLI renderer - provides friendly terminal output"""
 
     def __init__(self):
         self.console = Console() if RICH_AVAILABLE else None
         self._use_rich = RICH_AVAILABLE and self.console is not None
 
-    # ========== 图标字典 ==========
+    # ========== Icon dictionary ==========
     ICONS = {
         "success": "✅",
         "error": "❌",
@@ -59,16 +59,16 @@ class CLIRenderer:
         "party": "🎉",
     }
 
-    # ========== 基础输出方法 ==========
+    # ========== Basic output methods ==========
     def print(self, *args, **kwargs):
-        """打印文本"""
+        """Print text"""
         if self._use_rich:
             self.console.print(*args, **kwargs)
         else:
             print(*args, **kwargs)
 
     def print_panel(self, title: str, content: str, style: str = "blue"):
-        """打印面板"""
+        """Print a panel"""
         if self._use_rich:
             self.console.print(Panel(content, title=title, border_style=style))
         else:
@@ -79,12 +79,12 @@ class CLIRenderer:
             print(f"{'=' * 60}\n")
 
     def print_success(self, message: str):
-        """打印成功消息"""
+        """Print success message"""
         icon = self.ICONS["success"] if self._use_rich else "[OK]"
         self.print(f"[green]{icon} {message}[/]" if self._use_rich else f"✅ {message}")
 
     def print_error(self, message: str, details: Optional[str] = None):
-        """打印错误消息"""
+        """Print error message"""
         icon = self.ICONS["error"] if self._use_rich else "[ERROR]"
         if self._use_rich:
             self.print(f"[bold red]{icon} {message}[/]")
@@ -96,18 +96,18 @@ class CLIRenderer:
                 print(f"   详情：{details}")
 
     def print_warning(self, message: str):
-        """打印警告消息"""
+        """Print warning message"""
         icon = self.ICONS["warning"] if self._use_rich else "[WARN]"
         self.print(f"[yellow]{icon} {message}[/]" if self._use_rich else f"⚠️ {message}")
 
     def print_info(self, message: str):
-        """打印信息"""
+        """Print info message"""
         icon = self.ICONS["info"] if self._use_rich else "[INFO]"
         self.print(f"[cyan]{icon} {message}[/]" if self._use_rich else f"ℹ️ {message}")
 
-    # ========== 进度条 ==========
+    # ========== Progress bars ==========
     def create_progress(self, description: str = "处理中..."):
-        """创建进度条"""
+        """Create a progress bar"""
         if self._use_rich:
             return Progress(
                 SpinnerColumn(),
@@ -117,20 +117,20 @@ class CLIRenderer:
                 console=self.console,
             )
         else:
-            # 简单文本进度
+            # Simple text progress
             print(f"→ {description}")
             return None
 
     def print_loading(self, message: str):
-        """打印加载中提示"""
+        """Print loading hint"""
         if self._use_rich:
             self.print(f"[cyan]⠋ {message}...[/]")
         else:
             print(f"⏳ {message}...")
 
-    # ========== 表格渲染 ==========
+    # ========== Table rendering ==========
     def create_table(self, title: str = "", columns: Optional[List[str]] = None) -> Any:
-        """创建表格"""
+        """Create a table"""
         if not self._use_rich:
             return None
 
@@ -141,7 +141,7 @@ class CLIRenderer:
         return table
 
     def print_table(self, title: str, headers: List[str], rows: List[List[str]]):
-        """打印表格"""
+        """Print a table"""
         if self._use_rich:
             table = Table(title=title, box=ROUNDED, show_header=True, header_style="bold cyan")
             for header in headers:
@@ -150,7 +150,7 @@ class CLIRenderer:
                 table.add_row(*row)
             self.console.print(table)
         else:
-            # 简单文本表格
+            # Simple text table
             print(f"\n{title}")
             print("-" * 80)
             print(" | ".join(headers))
@@ -159,9 +159,9 @@ class CLIRenderer:
                 print(" | ".join(str(cell) for cell in row))
             print("-" * 80)
 
-    # ========== 项目信息卡片 ==========
+    # ========== Project info card ==========
     def print_repo_card(self, repo: Dict[str, Any]):
-        """打印项目信息卡片"""
+        """Print project info card"""
         name = repo.get("full_name", "Unknown")
         description = repo.get("description", "无描述")
         stars = repo.get("stars", 0)
@@ -186,9 +186,9 @@ class CLIRenderer:
             print(f" ⭐ {stars:,} | 🍴 {forks:,} | {language}")
             print(f" 🔗 {url}\n")
 
-    # ========== 代码块渲染 ==========
+    # ========== Code block rendering ==========
     def print_code(self, code: str, language: str = "python"):
-        """打印代码块"""
+        """Print a code block"""
         if self._use_rich:
             self.console.print(Syntax(code, language, theme="monokai", line_numbers=True))
         else:
@@ -196,17 +196,17 @@ class CLIRenderer:
             print(code)
             print("```\n")
 
-    # ========== Markdown 渲染 ==========
+    # ========== Markdown rendering ==========
     def print_markdown(self, content: str):
-        """打印 Markdown 内容"""
+        """Print Markdown content"""
         if self._use_rich:
             self.console.print(Markdown(content))
         else:
             print(content)
 
-    # ========== 启动横幅 ==========
+    # ========== Startup banner ==========
     def print_banner(self, version: str = "v1.1.0"):
-        """打印启动横幅"""
+        """Print startup banner"""
         banner = f"""
 ╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
@@ -227,9 +227,9 @@ class CLIRenderer:
         else:
             print(banner)
 
-    # ========== 帮助信息 ==========
+    # ========== Help information ==========
     def print_help(self, commands: Dict[str, str]):
-        """打印帮助信息"""
+        """Print help information"""
         if self._use_rich:
             table = Table(title="可用命令", box=ROUNDED, header_style="bold cyan")
             table.add_column("命令", style="yellow", width=20)
@@ -246,9 +246,9 @@ class CLIRenderer:
                 print(f"  {cmd:<20} {desc}")
             print("-" * 50)
 
-    # ========== 统计信息 ==========
+    # ========== Statistics ==========
     def print_stats(self, stats: Dict[str, Any], title: str = "统计"):
-        """打印统计信息"""
+        """Print statistics"""
         if self._use_rich:
             grid = Table.grid(padding=(0, 2))
             grid.add_column(style="cyan", width=20)
@@ -265,5 +265,5 @@ class CLIRenderer:
                 print(f"  {key}: {value}")
 
 
-# 全局渲染器实例
+# Global renderer instance
 renderer = CLIRenderer()

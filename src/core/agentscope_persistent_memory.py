@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-AgentScope 持久化记忆模块
+AgentScope persistent memory module
 
-功能:
-- 基于 AgentScope AsyncSQLAlchemyMemory 实现本地持久化
-- 数据存储于 SQLite 文件，完全本地化，不上传
-- 与现有 AgentScope Memory API 兼容
-- 提供同步接口（内部处理异步）
+Features:
+- Local persistence based on AgentScope AsyncSQLAlchemyMemory
+- Data stored in SQLite file, fully local, no uploads
+- Compatible with existing AgentScope Memory API
+- Provides synchronous interface (handles async internally)
 """
 
 import asyncio
@@ -26,16 +26,16 @@ logger = get_logger(__name__)
 
 class PersistentMemory:
     """
-    持久化记忆类
+    Persistent memory class
 
-    基于 AgentScope AsyncSQLAlchemyMemory，将对话历史持久化到本地 SQLite 数据库。
+    Based on AgentScope AsyncSQLAlchemyMemory, persists conversation history to a local SQLite database.
 
     Attributes:
-        memory: AgentScope AsyncSQLAlchemyMemory 实例
-        db_path: SQLite 数据库文件路径
+        memory: AgentScope AsyncSQLAlchemyMemory instance
+        db_path: SQLite database file path
     """
 
-    DEFAULT_MAX_MESSAGES = 100  # 持久化存储可以保留更多消息
+    DEFAULT_MAX_MESSAGES = 100  # Persistent storage can keep more messages
 
     def __init__(
         self,
@@ -44,17 +44,17 @@ class PersistentMemory:
         max_messages: int = DEFAULT_MAX_MESSAGES,
     ):
         """
-        初始化持久化记忆
+        Initialize persistent memory
 
         Args:
-            db_path: SQLite 数据库文件路径（自动创建目录）
-            table_name: 存储消息的表名
-            max_messages: 最大消息数量，超过后触发压缩
+            db_path: SQLite database file path (directory auto-created)
+            table_name: Table name for storing messages
+            max_messages: Maximum message count, triggers compression when exceeded
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # 创建 SQLAlchemy 异步引擎（SQLite）
+        # Create SQLAlchemy async engine (SQLite)
         # pool_pre_ping ensures connections are validated before use
         # pool_reset_on_return ensures connections are properly returned to pool
         self.engine = create_async_engine(
@@ -63,19 +63,19 @@ class PersistentMemory:
             pool_pre_ping=True,
         )
 
-        # 创建异步 Session
+        # Create async Session
         self.async_session = sessionmaker(
             bind=self.engine,
             class_=AsyncSession,
             expire_on_commit=False,
         )
 
-        # 初始化 AgentScope AsyncSQLAlchemyMemory
+        # Initialize AgentScope AsyncSQLAlchemyMemory
         self.memory = AsyncSQLAlchemyMemory(
             engine_or_session=self.engine,
         )
 
-        # 初始化数据库表
+        # Initialize database tables
         self._init_db()
 
         self.max_messages = max_messages
@@ -84,12 +84,12 @@ class PersistentMemory:
         logger.info(f"PersistentMemory initialized (db={self.db_path}, max_messages={max_messages})")
 
     def _init_db(self):
-        """初始化数据库表"""
+        """Initialize database tables"""
         async def _create_tables():
-            # 使用 AsyncSQLAlchemyMemory 内部的表模型
+            # Use internal table model from AsyncSQLAlchemyMemory
             from agentscope.memory import AsyncSQLAlchemyMemory
 
-            # 创建所有表
+            # Create all tables
             async with self.engine.begin() as conn:
                 await conn.run_sync(AsyncSQLAlchemyMemory.MessageTable.metadata.create_all)
 
@@ -97,7 +97,7 @@ class PersistentMemory:
         logger.debug("Database tables created successfully")
 
     async def close(self) -> None:
-        """关闭数据库连接"""
+        """Close database connection"""
         # First ensure the async_session factory is disposed
         if hasattr(self, 'async_session') and self.async_session:
             # Close any lingering sessions
@@ -111,7 +111,7 @@ class PersistentMemory:
         logger.debug("PersistentMemory database connection closed")
 
     def __del__(self) -> None:
-        """确保连接在 GC 时被正确清理"""
+        """Ensure connections are properly cleaned up during GC"""
         try:
             if hasattr(self, 'engine') and self.engine:
                 self._run_async(self.close())
@@ -119,15 +119,15 @@ class PersistentMemory:
             pass  # During GC, cleanup may fail — suppress errors
 
     def __enter__(self) -> "PersistentMemory":
-        """上下文管理器入口"""
+        """Context manager entry"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """上下文管理器出口"""
+        """Context manager exit"""
         self._run_async(self.close())
 
     def _run_async(self, coro):
-        """运行异步协程"""
+        """Run an async coroutine"""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -171,14 +171,14 @@ class PersistentMemory:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        添加消息到持久化存储
+        Add a message to persistent storage
 
         Args:
-            role: 角色 (user/assistant/system)
-            content: 消息内容
-            name: 发送者名称
-            mark: 消息标记（用于过滤）
-            metadata: 元数据
+            role: Role (user/assistant/system)
+            content: Message content
+            name: Sender name
+            mark: Message mark (for filtering)
+            metadata: Metadata
         """
         msg = Msg(
             name=name,
@@ -190,11 +190,11 @@ class PersistentMemory:
         self._run_async(self.memory.add(msg, mark=mark))
         logger.debug(f"Added {role} message to persistent storage (total: {self.size()})")
 
-        # 检查是否需要压缩
+        # Check if compression is needed
         self._check_and_compress()
 
     def add_user_message(self, content: str) -> None:
-        """添加用户消息"""
+        """Add a user message"""
         self.add_message("user", content, name="user")
 
     def add_assistant_message(
@@ -203,7 +203,7 @@ class PersistentMemory:
         name: str = "assistant",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """添加助手消息"""
+        """Add an assistant message"""
         self.add_message("assistant", content, name=name, metadata=metadata)
 
     def add_tool_result(
@@ -212,7 +212,7 @@ class PersistentMemory:
         result: Any,
         name: str = "assistant",
     ) -> None:
-        """添加工具调用结果"""
+        """Add a tool call result"""
         content = f"[{tool_name}] Result: {result if isinstance(result, str) else str(result)}"
         self.add_message(
             "assistant",
@@ -223,24 +223,24 @@ class PersistentMemory:
         )
 
     def size(self) -> int:
-        """获取消息数量"""
+        """Get message count"""
         return self._run_async(self.memory.size())
 
     def get_memory(self) -> List[Msg]:
-        """获取所有消息"""
+        """Get all messages"""
         return self._run_async(self.memory.get_memory())
 
     def get_messages_for_prompt(self) -> List[Dict[str, Any]]:
         """
-        获取用于构建 Prompt 的消息列表
+        Get message list for building the prompt
 
         Returns:
-            消息字典列表
+            List of message dictionaries
         """
         messages = self.get_memory()
         result = []
 
-        # 先添加摘要（如果有）
+        # Add summary first (if any)
         if self.compressed_summary:
             result.append({
                 "role": "system",
@@ -248,7 +248,7 @@ class PersistentMemory:
                 "name": "system",
             })
 
-        # 添加所有消息
+        # Add all messages
         for msg in messages:
             result.append({
                 "role": msg.role,
@@ -260,98 +260,98 @@ class PersistentMemory:
         return result
 
     def _check_and_compress(self) -> None:
-        """检查消息数量，超过阈值则压缩"""
+        """Check message count, compress if threshold exceeded"""
         if self.size() > self.max_messages:
             logger.info(f"PersistentMemory exceeds {self.max_messages} messages, triggering compression...")
             self._compress_memory()
 
     def _compress_memory(self) -> None:
         """
-        压缩记忆
+        Compress memory
 
-        策略：
-        1. 保留最近的 N 条消息
-        2. 将早期消息总结为摘要
+        Strategy:
+        1. Keep the most recent N messages
+        2. Summarize earlier messages into a summary
         """
         messages = self.get_memory()
 
         if len(messages) <= self.max_messages:
             return
 
-        # 提取需要压缩的消息
+        # Extract messages to compress
         to_compress = messages[:len(messages) - self.max_messages + 2]
 
-        # 生成摘要
+        # Generate summary
         if to_compress:
             self.compressed_summary = self._generate_summary(to_compress)
             logger.info(f"Generated memory summary: {len(self.compressed_summary)} chars")
 
-            # 清除旧消息并保留最近的
+            # Clear old messages and keep the recent ones
             self._run_async(self.memory.clear())
 
-            # 重新添加摘要和最近的消息
+            # Re-add summary and recent messages
             recent_messages = messages[-(self.max_messages - 2):]
             for msg in recent_messages:
                 self._run_async(self.memory.add(msg))
 
     def _generate_summary(self, messages: List[Msg]) -> str:
         """
-        生成记忆摘要
+        Generate a memory summary
 
         Args:
-            messages: 需要压缩的消息列表
+            messages: List of messages to compress
 
         Returns:
-            摘要字符串
+            Summary string
         """
-        summary_parts = ["【历史对话摘要】"]
+        summary_parts = ["【Historical Conversation Summary】"]
 
-        # 统计工具调用
+        # Count tool calls
         tool_calls = [
             msg.metadata.get("tool_name")
             for msg in messages
             if msg.role == "assistant" and msg.metadata.get("tool_name")
         ]
         if tool_calls:
-            summary_parts.append(f"调用的工具：{', '.join(set(tool_calls))}")
+            summary_parts.append(f"Tools used: {', '.join(set(tool_calls))}")
 
-        # 提取用户查询
+        # Extract user queries
         user_queries = [
             msg.content[:100]
             for msg in messages
             if msg.role == "user"
         ]
         if user_queries:
-            summary_parts.append(f"用户查询：{' | '.join(user_queries[:3])}")
+            summary_parts.append(f"User queries: {' | '.join(user_queries[:3])}")
 
-        # 提取助手回复
+        # Extract assistant responses
         assistant_responses = [
             msg.content[:200]
             for msg in messages
             if msg.role == "assistant"
         ]
         if assistant_responses:
-            summary_parts.append(f"助手回复：{' | '.join(assistant_responses[:2])}")
+            summary_parts.append(f"Assistant responses: {' | '.join(assistant_responses[:2])}")
 
-        summary_parts.append("【结束】")
+        summary_parts.append("【End】")
         return "\n".join(summary_parts)
 
     def clear(self) -> None:
-        """清空记忆"""
+        """Clear memory"""
         self._run_async(self.memory.clear())
         self.compressed_summary = ""
         logger.info("PersistentMemory cleared")
 
     def get_state_dict(self) -> Dict[str, Any]:
-        """获取记忆状态字典"""
+        """Get memory state dictionary"""
         return self._run_async(self.memory.state_dict())
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """从状态字典加载记忆"""
+        """Load memory from state dictionary"""
         self._run_async(self.memory.load_state_dict(state_dict))
 
 
-# 便捷函数：获取单例的 PersistentMemory
+# Convenience function: get singleton PersistentMemory
 _persistent_memory_cache: Optional[PersistentMemory] = None
 
 
@@ -361,15 +361,15 @@ def get_persistent_memory(
     force_new: bool = False,
 ) -> PersistentMemory:
     """
-    获取 PersistentMemory 实例（单例模式）
+    Get a PersistentMemory instance (singleton pattern)
 
     Args:
-        db_path: SQLite 数据库文件路径
-        table_name: 表名
-        force_new: 是否强制创建新实例
+        db_path: SQLite database file path
+        table_name: Table name
+        force_new: Whether to force creation of a new instance
 
     Returns:
-        PersistentMemory 实例
+        PersistentMemory instance
     """
     global _persistent_memory_cache
 
@@ -384,9 +384,9 @@ def get_persistent_memory(
 
 class PersistentMemoryContext:
     """
-    PersistentMemory 上下文管理器
+    PersistentMemory context manager
 
-    使用示例:
+    Usage example:
         with PersistentMemoryContext(db_path="data/app.db") as pm:
             pm.add_user_message("Hello")
     """
@@ -401,6 +401,6 @@ class PersistentMemoryContext:
         return self.pm
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        # 清理单例缓存，允许下次创建新实例
+        # Clear singleton cache to allow new instance on next use
         global _persistent_memory_cache
         _persistent_memory_cache = None

@@ -69,3 +69,9 @@ node_modules/
 .hermes/mission-results/
 .hermes/mission-log
 .hermes/MISSION_INDEX.md
+
+# Migration plan (internal working document, not for public repo)
+docs/MIGRATION_PLAN.md
+
+# Internal documentation (not for public repo)
+internal/

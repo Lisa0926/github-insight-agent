@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-研究员 Agent
+Researcher Agent
 
-功能:
-- 专业的开源情报研究员
-- 使用 GitHub 工具搜索项目并提取关键信息
-- 返回结构化数据或简洁总结
-- 使用 AgentScope ModelWrapper 进行模型调用
-- 使用 AgentScope Msg 类统一消息格式
-- 继承 AgentScope AgentBase
+Features:
+- Professional open-source intelligence researcher
+- Uses GitHub tools to search for projects and extract key information
+- Returns structured data or concise summaries
+- Uses AgentScope ModelWrapper for model calls
+- Uses AgentScope Msg class for unified message format
+- Inherits from AgentScope AgentBase
 """
 
 from typing import Any, Dict, List, Optional, Union
@@ -19,14 +19,13 @@ from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
-from src.core.agentscope_memory import AgentScopeMemory
-from src.core.agentscope_persistent_memory import get_persistent_memory
-from src.core.studio_helper import StudioHelper, set_global_studio_config, forward_to_studio
+from src.core.studio_helper import StudioHelper, set_global_studio_config
 from src.tools.github_tool import GitHubTool
 from src.tools.tool_registry import register_github_tools, global_registry
 from src.tools.github_toolkit import get_github_toolkit
+from src.agents.base_agent import GiaAgentBase
 
-# 如果启用 tracing，导入装饰器
+# Import trace decorator if tracing is enabled
 try:
     from agentscope.tracing import trace
     TRACING_AVAILABLE = True
@@ -40,29 +39,25 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Studio 配置助手
+# Studio configuration helper
 _studio_helper: Optional[StudioHelper] = None
 
 
 def set_studio_config(studio_url: str, run_id: str) -> None:
-    """设置 Studio 配置并注册 run（使用共享模块）"""
+    """Set Studio configuration and register run (using shared module)"""
     global _studio_helper
     _studio_helper = StudioHelper(studio_url, run_id)
     set_global_studio_config(studio_url, run_id)
     logger.debug(f"Studio config set for run: {run_id}")
 
 
-def _forward_to_studio(name: str, content: str, role: str) -> None:
-    """手动转发消息到 Studio（使用共享模块）"""
-    forward_to_studio(name, content, role)
-
-
-class ResearcherAgent:
+class ResearcherAgent(GiaAgentBase):
     """
-    研究员 Agent
+    Researcher Agent
 
-    角色：专业的开源情报研究员
-    任务：根据用户查询，使用 GitHub 工具搜索项目，并提取关键信息
+    Role: Professional open-source intelligence researcher
+    Task: Search for projects using GitHub tools based on user queries,
+          and extract key information
     """
 
     SYSTEM_PROMPT = """你是一个专业的开源情报研究员 (Open Source Intelligence Researcher)。
@@ -94,13 +89,17 @@ class ResearcherAgent:
         use_persistent: bool = True,
         db_path: str = "data/app.db",
     ):
-        self.name = name
-        self.model_name = model_name
-        self.config = config or ConfigManager()
-        self.system_prompt = self.SYSTEM_PROMPT
+        super().__init__(
+            name=name,
+            model_name=model_name,
+            system_prompt=self.SYSTEM_PROMPT,
+            config=config,
+            use_persistent=use_persistent,
+            db_path=db_path,
+        )
+
         self.use_toolkit = use_toolkit
         self.use_mcp = use_mcp
-        self.use_persistent = use_persistent
 
         self.github_tool = GitHubTool(config=self.config)
         register_github_tools(self.github_tool)
@@ -110,49 +109,29 @@ class ResearcherAgent:
             self.toolkit = get_github_toolkit(config=self.config, use_mcp=use_mcp)
             logger.info("AgentScope Toolkit initialized with GitHub tools")
 
-        if use_persistent:
-            self.memory = get_persistent_memory(db_path=db_path)
-            logger.info(f"PersistentMemory initialized (db={db_path})")
-        else:
-            self.memory = AgentScopeMemory(max_messages=10)
-            logger.info("InMemoryMemory initialized (max_messages=10)")
-
-        self._model_wrapper = None
         logger.info(f"ResearcherAgent '{name}' initialized with model '{model_name}'")
-
-    def _get_model_wrapper(self):
-        """懒加载 AgentScope DashScopeChatModel"""
-        if self._model_wrapper is None:
-            from agentscope.model import DashScopeChatModel
-            model_config = self.config.get_model_config(self.model_name)
-            self._model_wrapper = DashScopeChatModel(
-                model_name=self.model_name,
-                api_key=model_config.get("api_key", self.config.dashscope_api_key),
-            )
-            logger.info(f"DashScopeChatModel created for model '{self.model_name}'")
-        return self._model_wrapper
 
     def _parse_time_range(self, user_query: str) -> Optional[int]:
         """
-        从用户查询中提取时间范围（天数）
+        Extract time range (in days) from user query
 
-        支持的自然语言格式：
-        - 最近 N 天 / 近 N 天 / 过去 N 天
-        - 今天/今日/昨天/本周/本月
-        - N 天内（如：三天内、五天内）
+        Supported natural language formats:
+        - Last N days / Past N days / Recent N days
+        - Today/Yesterday/This week/This month
+        - Within N days (e.g., within three days, within five days)
         """
-        # 动态匹配：最近 N 天 / 近 N 天 / 过去 N 天
-        days_match = re.search(r"(?:最近 | 近|过去)\s*(\d+)\s*天", user_query)
+        # Dynamic matching: 最近 N 天 / 近 N 天 / 过去 N 天
+        days_match = re.search(r"(?:最近|近|过去)\s*(\d+)\s*天", user_query)
         if days_match:
             return int(days_match.group(1))
 
-        # N 天内格式（三天内、五天内等）- 中文数字映射
+        # "Within N days" format (三天内、五天内, etc.) - Chinese numeral mapping
         chinese_nums = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
         for cn, val in chinese_nums.items():
             if f"{cn}天内" in user_query:
                 return val
 
-        # 固定匹配
+        # Fixed matching
         if any(kw in user_query for kw in ["今天", "今日"]):
             return 0
         if "昨天" in user_query:
@@ -166,33 +145,33 @@ class ResearcherAgent:
 
     def _build_search_params(self, user_query: str) -> dict:
         """
-        构建 GitHub Search API 参数
+        Build GitHub Search API parameters
 
-        使用简单规则解析：
-        1. 检测时间范围，添加 created 条件
-        2. 提取项目数量（如"前 3 个"）
-        3. 检测排序偏好（star 最高 → sort=stars）
+        Uses simple rule-based parsing:
+        1. Detect time range, add created condition
+        2. Extract number of projects (e.g., "top 3")
+        3. Detect sorting preference (most forked -> sort=forks)
         """
-        # 默认参数
+        # Default parameters
         params = {
             "search_query": user_query,
             "sort": "stars",
             "per_page": 10,
         }
 
-        # 1. 解析时间范围
+        # 1. Parse time range
         days = self._parse_time_range(user_query)
         if days is not None:
             start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
             end_date = datetime.now().strftime("%Y-%m-%d")
             params["search_query"] = f"created:{start_date}..{end_date}"
 
-        # 2. 提取项目数量
+        # 2. Extract number of projects
         count_match = re.search(r"前?\s*(\d+)\s*个", user_query)
         if count_match:
             params["per_page"] = min(int(count_match.group(1)), 20)
 
-        # 3. 检测排序偏好
+        # 3. Detect sorting preference
         if "fork" in user_query:
             params["sort"] = "forks"
         elif "updated" in user_query or "最新" in user_query:
@@ -209,21 +188,21 @@ class ResearcherAgent:
         per_page: int = None,
     ) -> Dict[str, Any]:
         """
-        搜索并分析 GitHub 仓库
+        Search and analyze GitHub repositories
 
         Args:
-            query: 搜索关键词（自然语言或 GitHub Search 语法）
-            sort: 排序字段（可选，不传则自动解析）
-            order: 排序顺序
-            per_page: 结果数量（可选，不传则自动解析）
+            query: Search keyword (natural language or GitHub Search syntax)
+            sort: Sort field (optional, auto-parsed if not provided)
+            order: Sort order
+            per_page: Number of results (optional, auto-parsed if not provided)
 
         Returns:
-            搜索结果字典
+            Dictionary of search results
         """
-        # 构建搜索参数（自动解析自然语言）
+        # Build search parameters (auto-parse natural language)
         params = self._build_search_params(query)
 
-        # 如果外部指定了 sort/per_page，优先使用
+        # If sort/per_page are specified externally, use those preferentially
         if sort:
             params["sort"] = sort
         if per_page:
@@ -271,7 +250,7 @@ class ResearcherAgent:
             }
 
     def generate_summary(self, search_result: Dict[str, Any]) -> str:
-        """生成搜索结果的摘要"""
+        """Generate a summary of search results"""
         if search_result.get("error"):
             return f"搜索失败：{search_result['error']}"
 
@@ -304,7 +283,7 @@ class ResearcherAgent:
         return "\n".join(lines)
 
     def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
-        """响应用户消息"""
+        """Respond to user message"""
         if isinstance(msg, str):
             msg = Msg(name="user", content=msg, role="user")
 
@@ -315,7 +294,7 @@ class ResearcherAgent:
         return response
 
     def reply_to_message(self, user_query: str) -> str:
-        """响应用户查询"""
+        """Respond to user query"""
         logger.info(f"Received query: {user_query}")
 
         query_lower = user_query.lower()
@@ -325,13 +304,8 @@ class ResearcherAgent:
         else:
             return self._call_llm(user_query)
 
-    def _add_to_memory(self, role: str, content: str, name: Optional[str] = None) -> None:
-        """添加消息到记忆"""
-        self.memory.add_message(role=role, content=content, name=name or self.name)
-        _forward_to_studio(name or self.name, content, role)
-
     def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
-        """构建消息历史"""
+        """Build message history"""
         messages = [{"name": "system", "content": self.system_prompt, "role": "system"}]
         memory_messages = self.memory.get_messages_for_prompt()
         messages.extend(memory_messages)
@@ -339,18 +313,12 @@ class ResearcherAgent:
         return messages
 
     def _call_llm(self, user_query: str) -> str:
-        """调用 LLM 进行回复"""
+        """Call LLM to generate a response"""
         try:
             model_wrapper = self._get_model_wrapper()
             messages = self._build_messages(user_query)
             response = model_wrapper(messages=messages)
-            content = ""
-            if hasattr(response, "text"):
-                content = response.text
-            elif isinstance(response, dict):
-                content = response.get("content", "")
-            elif hasattr(response, "__dict__"):
-                content = getattr(response, "content", "") or getattr(response, "text", "")
+            content = self._extract_response_text(response)
             self._add_to_memory("assistant", content)
             return content
         except Exception as e:
@@ -358,7 +326,7 @@ class ResearcherAgent:
             return f"抱歉，AI 响应失败：{e}"
 
     def get_status(self) -> Dict[str, Any]:
-        """获取 Agent 状态"""
+        """Get Agent status"""
         status = {
             "name": self.name,
             "model": self.model_name,
@@ -384,5 +352,5 @@ class ResearcherAgent:
         return status
 
     def get_description(self) -> str:
-        """获取 ResearcherAgent 描述"""
+        """Get ResearcherAgent description"""
         return "专业的开源情报研究员，擅长使用 GitHub 工具搜索项目并提取关键信息。"

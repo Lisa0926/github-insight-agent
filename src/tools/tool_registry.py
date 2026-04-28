@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-工具注册模块
+Tool registry module
 
-功能:
-- 实现简单的工具注册机制
-- 将工具方法注册为全局可用的工具列表
-- 方便后续注入到 Agent 中
+Features:
+- Implements a simple tool registration mechanism
+- Registers tool methods as a globally available tool list
+- Facilitates later injection into the Agent
 
-使用示例:
+Usage example:
     from src.tools import tool_registry, GitHubTool
 
-    # 注册工具
+    # Register the tool
     tool_registry.register_tool(GitHubTool)
 
-    # 获取已注册的工具列表
+    # Get the list of registered tools
     tools = tool_registry.get_registered_tools()
 """
 
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class ToolInfo:
-    """工具信息数据类"""
+    """Tool information data class"""
 
     name: str
     description: str
@@ -37,9 +37,9 @@ class ToolInfo:
 
 class ToolRegistry:
     """
-    工具注册器单例类
+    Tool registry singleton class
 
-    用于管理和注册项目中所有的工具函数，方便 Agent 调用。
+    Manages and registers all tool functions in the project for Agent invocation.
     """
 
     _instance: Optional["ToolRegistry"] = None
@@ -64,13 +64,13 @@ class ToolRegistry:
         parameters: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        注册一个工具函数
+        Register a tool function
 
         Args:
-            name: 工具名称
-            description: 工具描述
-            func: 工具函数
-            parameters: 参数描述字典
+            name: Tool name
+            description: Tool description
+            func: Tool function
+            parameters: Parameter description dictionary
         """
         self._tools[name] = ToolInfo(
             name=name,
@@ -82,38 +82,38 @@ class ToolRegistry:
 
     def get_tool(self, name: str) -> Optional[ToolInfo]:
         """
-        获取已注册的工具
+        Get a registered tool
 
         Args:
-            name: 工具名称
+            name: Tool name
 
         Returns:
-            ToolInfo 或 None
+            ToolInfo or None
         """
         return self._tools.get(name)
 
     def get_registered_tools(self) -> List[str]:
         """
-        获取所有已注册的工具名称
+        Get all registered tool names
 
         Returns:
-            工具名称列表
+            List of tool names
         """
         return list(self._tools.keys())
 
     def call_tool(self, name: str, **kwargs) -> Any:
         """
-        调用已注册的工具
+        Call a registered tool
 
         Args:
-            name: 工具名称
-            **kwargs: 工具参数
+            name: Tool name
+            **kwargs: Tool parameters
 
         Returns:
-            工具调用结果
+            Tool call result
 
         Raises:
-            KeyError: 工具未注册时抛出
+            KeyError: Raised when the tool is not registered
         """
         tool = self.get_tool(name)
         if not tool:
@@ -122,10 +122,10 @@ class ToolRegistry:
 
     def to_agent_scope_format(self) -> List[Dict[str, Any]]:
         """
-        转换为 AgentScope 兼容的工具格式
+        Convert to AgentScope-compatible tool format
 
         Returns:
-            AgentScope 工具配置列表
+            AgentScope tool configuration list
         """
         return [
             {
@@ -137,25 +137,25 @@ class ToolRegistry:
         ]
 
     def clear(self) -> None:
-        """清空所有已注册的工具"""
+        """Clear all registered tools"""
         self._tools.clear()
         logger.debug("All tools cleared")
 
 
-# 全局工具注册器实例
+# Global tool registry instance
 global_registry = ToolRegistry()
 
 
 def register_github_tools(github_tool_instance: Any) -> None:
     """
-    将 GitHubTool 的方法注册到全局注册器
+    Register GitHubTool methods to the global registry
 
     Args:
-        github_tool_instance: GitHubTool 实例
+        github_tool_instance: GitHubTool instance
     """
     global_registry = ToolRegistry()
 
-    # 注册 search_repositories
+    # Register search_repositories
     global_registry.register_tool(
         name="search_repositories",
         description="Search for GitHub repositories by keyword. "
@@ -190,7 +190,7 @@ def register_github_tools(github_tool_instance: Any) -> None:
         },
     )
 
-    # 注册 get_readme
+    # Register get_readme
     global_registry.register_tool(
         name="get_readme",
         description="Get the README content of a specific GitHub repository.",
@@ -216,7 +216,7 @@ def register_github_tools(github_tool_instance: Any) -> None:
         },
     )
 
-    # 注册 get_repo_info
+    # Register get_repo_info
     global_registry.register_tool(
         name="get_repo_info",
         description="Get detailed information about a specific GitHub repository.",
@@ -237,7 +237,7 @@ def register_github_tools(github_tool_instance: Any) -> None:
         },
     )
 
-    # 注册 get_project_summary (Day 5-6 新增)
+    # Register get_project_summary (added in Day 5-6)
     global_registry.register_tool(
         name="get_project_summary",
         description="Get a comprehensive project summary including repo info "

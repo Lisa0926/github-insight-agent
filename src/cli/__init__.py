@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-CLI 模块初始化
+CLI module initialization
 """
 
 from src.cli.cli_renderer import CLIRenderer, renderer

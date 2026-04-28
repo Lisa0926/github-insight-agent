@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-OWASP Top 10 安全规则检测
+OWASP Top 10 Security Rule Detection
 
-功能:
-- 检测 OWASP Top 10 安全漏洞
-- 覆盖 2021 年最新版 OWASP Top 10 类别
-- 提供修复建议和代码示例
+Features:
+- Detect OWASP Top 10 security vulnerabilities
+- Covers latest 2021 OWASP Top 10 categories
+- Provides remediation suggestions and code examples
 
-OWASP Top 10 2021 类别:
+OWASP Top 10 2021 Categories:
 A01: Broken Access Control
 A02: Cryptographic Failures
 A03: Injection
@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 
 
 class IssueSeverity(Enum):
-    """问题严重程度"""
+    """Issue severity levels"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -41,7 +41,7 @@ class IssueSeverity(Enum):
 
 
 class IssueCategory(Enum):
-    """问题类别 (OWASP Top 10 2021)"""
+    """Issue categories (OWASP Top 10 2021)"""
     A01_ACCESS_CONTROL = "A01: Broken Access Control"
     A02_CRYPTOGRAPHIC = "A02: Cryptographic Failures"
     A03_INJECTION = "A03: Injection"
@@ -57,7 +57,7 @@ class IssueCategory(Enum):
 
 @dataclass
 class SecurityComment:
-    """安全审查评论"""
+    """Security review comment"""
     file_path: str
     line_number: int
     category: IssueCategory
@@ -71,15 +71,15 @@ class SecurityComment:
 
 class OWASPRuleEngine:
     """
-    OWASP Top 10 安全规则检测引擎
+    OWASP Top 10 Security Rule Detection Engine
 
-    基于正则表达式检测常见安全漏洞模式。
+    Detects common security vulnerability patterns using regular expressions.
     """
 
-    # OWASP Top 10 安全规则库 (50+ 条规则)
+    # OWASP Top 10 security rule library (50+ rules)
     SECURITY_RULES = {
         # ===========================================
-        # A01: Broken Access Control (访问控制破坏)
+        # A01: Broken Access Control
         # ===========================================
         "a01_hardcoded_admin": {
             "pattern": r"(admin|root|superuser)\s*=\s*(True|1|'true'|\"true\")",
@@ -119,7 +119,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A02: Cryptographic Failures (加密失败)
+        # A02: Cryptographic Failures
         # ===========================================
         "a02_md5_password": {
             "pattern": r"(md5|MD5)\s*\(.*?(password|passwd|pwd)",
@@ -177,7 +177,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A03: Injection (注入漏洞)
+        # A03: Injection
         # ===========================================
         "a03_sql_injection_fstring": {
             "pattern": r"(execute|cursor\.execute|query)\s*\(\s*f['\"]SELECT",
@@ -253,7 +253,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A04: Insecure Design (不安全设计)
+        # A04: Insecure Design
         # ===========================================
         "a04_weak_rate_limit": {
             "pattern": r"rate[_-]?limit\s*=\s*(0|99999|Infinity)",
@@ -293,7 +293,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A05: Security Misconfiguration (安全配置错误)
+        # A05: Security Misconfiguration
         # ===========================================
         "a05_debug_true": {
             "pattern": r"DEBUG\s*=\s*True",
@@ -342,7 +342,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A06: Vulnerable Components (易受攻击的组件)
+        # A06: Vulnerable Components
         # ===========================================
         "a06_outdated_python": {
             "pattern": r"python_requires\s*=\s*['\"]>=?\s*(2\.|3\.[0-5])",
@@ -373,7 +373,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A07: Auth Failure (认证失败)
+        # A07: Auth Failure
         # ===========================================
         "a07_weak_password": {
             "pattern": r"min_length\s*=\s*[1-5]\b",
@@ -422,7 +422,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A08: Integrity Failure (完整性失败)
+        # A08: Integrity Failure
         # ===========================================
         "a08_unserialize": {
             "pattern": r"(pickle|marshal|unserialize)\.loads?\s*\(",
@@ -462,7 +462,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A09: Logging Failure (日志记录失败)
+        # A09: Logging Failure
         # ===========================================
         "a09_missing_audit_log": {
             "pattern": r"def\s+(login|logout|register|delete|admin)",
@@ -493,7 +493,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # A10: SSRF (服务器端请求伪造)
+        # A10: SSRF
         # ===========================================
         "a10_ssrf_url": {
             "pattern": r"(requests|urllib|httpx)\.(get|post|put|fetch)\s*\([^)]*url\s*=\s*\w+",
@@ -524,7 +524,7 @@ class OWASPRuleEngine:
         },
 
         # ===========================================
-        # General Security (通用安全)
+        # General Security
         # ===========================================
         "gen_hardcoded_secret": {
             "pattern": r"(password|secret|api_key|token|apikey|private_key)\s*=\s*['\"][^'\"]{8,}['\"]",
@@ -602,25 +602,25 @@ class OWASPRuleEngine:
 
     def __init__(self, config: Optional[ConfigManager] = None):
         """
-        初始化 OWASP 规则引擎
+        Initialize OWASP rule engine
 
         Args:
-            config: 配置管理器实例
+            config: Configuration manager instance
         """
         self._config = config or ConfigManager()
         logger.info("OWASPRuleEngine initialized with %d rules", len(self.SECURITY_RULES))
 
     def detect_issues(self, file_path: str, code_content: str, start_line: int = 1) -> List[SecurityComment]:
         """
-        检测代码中的安全问题
+        Detect security issues in code
 
         Args:
-            file_path: 文件路径
-            code_content: 代码内容
-            start_line: 起始行号
+            file_path: File path
+            code_content: Code content
+            start_line: Starting line number
 
         Returns:
-            SecurityComment 列表
+            List of SecurityComment objects
         """
         issues: List[SecurityComment] = []
 
@@ -628,10 +628,10 @@ class OWASPRuleEngine:
             matches = re.finditer(rule_config["pattern"], code_content, re.IGNORECASE | re.MULTILINE)
 
             for match in matches:
-                # 计算行号
+                # Calculate line number
                 line_number = start_line + code_content[:match.start()].count('\n')
 
-                # 创建安全审查评论
+                # Create security review comment
                 comment = SecurityComment(
                     file_path=file_path,
                     line_number=line_number,
@@ -647,7 +647,7 @@ class OWASPRuleEngine:
         return issues
 
     def get_stats(self) -> Dict[str, Any]:
-        """获取规则统计信息"""
+        """Get rule statistics"""
         stats = {
             "total_rules": len(self.SECURITY_RULES),
             "by_category": {},
@@ -656,15 +656,15 @@ class OWASPRuleEngine:
         }
 
         for rule_name, rule_config in self.SECURITY_RULES.items():
-            # 按类别统计
+            # Count by category
             cat = rule_config["category"].value
             stats["by_category"][cat] = stats["by_category"].get(cat, 0) + 1
 
-            # 按严重程度统计
+            # Count by severity
             sev = rule_config["severity"].value
             stats["by_severity"][sev] = stats["by_severity"].get(sev, 0) + 1
 
-            # OWASP 覆盖
+            # OWASP coverage
             stats["owasp_coverage"].add(rule_config["owasp_id"])
 
         stats["owasp_coverage"] = list(stats["owasp_coverage"])
@@ -677,22 +677,22 @@ async def scan_security(
     config: Optional[ConfigManager] = None,
 ) -> ToolResponse:
     """
-    安全扫描工具函数
+    Security scanning utility function
 
     Args:
-        file_path: 文件路径
-        code_content: 代码内容
-        config: 配置管理器
+        file_path: File path
+        code_content: Code content
+        config: Configuration manager
 
     Returns:
-        ToolResponse 包装的扫描结果
+        Scan results wrapped in ToolResponse
     """
     try:
         engine = OWASPRuleEngine(config=config)
         issues = engine.detect_issues(file_path, code_content)
         stats = engine.get_stats()
 
-        # 按严重程度分组
+        # Group by severity
         issues_by_severity = {
             "critical": [i for i in issues if i.severity == IssueSeverity.CRITICAL],
             "high": [i for i in issues if i.severity == IssueSeverity.HIGH],
@@ -700,7 +700,7 @@ async def scan_security(
             "low": [i for i in issues if i.severity == IssueSeverity.LOW],
         }
 
-        # 格式化报告
+        # Format report
         report_text = _format_report(file_path, issues, stats)
 
         report = {
@@ -734,7 +734,7 @@ async def scan_security(
 
 
 def _format_report(file_path: str, issues: List[SecurityComment], stats: Dict[str, Any]) -> str:
-    """格式化扫描报告"""
+    """Format scan report"""
     lines = [
         "=" * 60,
         "OWASP Top 10 安全扫描报告",
@@ -747,7 +747,7 @@ def _format_report(file_path: str, issues: List[SecurityComment], stats: Dict[st
         "",
     ]
 
-    # 按严重程度分组
+    # Group by severity
     by_severity = {}
     for issue in issues:
         sev = issue.severity.value
@@ -759,7 +759,7 @@ def _format_report(file_path: str, issues: List[SecurityComment], stats: Dict[st
         if sev in by_severity:
             icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}[sev]
             lines.append(f"{icon} {sev.upper()} ({len(by_severity[sev])} 个)")
-            for issue in by_severity[sev][:5]:  # 每级最多显示 5 个
+            for issue in by_severity[sev][:5]:  # Show at most 5 per level
                 lines.append(f"   - [{issue.owasp_id}] {issue.file_path}:{issue.line_number}")
                 lines.append(f"     {issue.message}")
                 if issue.suggestion:

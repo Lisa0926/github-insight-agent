@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Pydantic 数据模型定义
+Pydantic data model definitions
 
-功能:
-- 定义 GitHub 相关数据的类型约束
-- 提供数据校验和序列化能力
-- 支持类型驱动开发
+Features:
+- Defines type constraints for GitHub-related data
+- Provides data validation and serialization capabilities
+- Supports type-driven development
 
-使用类型注解和 Pydantic v2 标准。
+Uses type annotations and Pydantic v2 standard.
 """
 
 from datetime import datetime
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 
 class GitHubRepoInfo(BaseModel):
-    """GitHub 仓库信息模型"""
+    """GitHub repository information model"""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -59,7 +59,7 @@ class GitHubRepoInfo(BaseModel):
 
 
 class GitHubIssueInfo(BaseModel):
-    """GitHub Issue 信息模型"""
+    """GitHub Issue information model"""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -95,7 +95,7 @@ class GitHubIssueInfo(BaseModel):
 
 
 class GitHubPRInfo(BaseModel):
-    """GitHub Pull Request 信息模型"""
+    """GitHub Pull Request information model"""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -143,7 +143,7 @@ class GitHubPRInfo(BaseModel):
 
 
 class AnalysisResult(BaseModel):
-    """分析结果模型"""
+    """Analysis result model"""
 
     repo_name: str = Field(..., description="仓库名称")
     analysis_type: str = Field(..., description="分析类型")
@@ -156,15 +156,15 @@ class AnalysisResult(BaseModel):
 
 
 # ===========================================
-# Day 3-4: 新增核心数据模型
+# Day 3-4: New core data models
 # ===========================================
 
 
 class GitHubRepo(BaseModel):
     """
-    GitHub 仓库数据模型
+    GitHub repository data model
 
-    用于表示 GitHub 搜索和仓库查询的结果。
+    Used to represent results from GitHub search and repository queries.
     """
 
     full_name: str = Field(..., description="完整名称 (owner/repo)")
@@ -175,7 +175,7 @@ class GitHubRepo(BaseModel):
     topics: List[str] = Field(default_factory=list, description="仓库主题标签")
     updated_at: str = Field("", description="最后更新时间 (ISO 8601)")
 
-    # 额外可选字段
+    # Additional optional fields
     forks_count: int = Field(0, description="Fork 数量")
     watchers_count: int = Field(0, description="Watch 数量")
     open_issues_count: int = Field(0, description="未关闭 Issue 数量")
@@ -186,13 +186,13 @@ class GitHubRepo(BaseModel):
     @classmethod
     def from_api_response(cls, data: Dict[str, Any]) -> "GitHubRepo":
         """
-        从 GitHub API 响应数据创建实例
+        Create an instance from GitHub API response data
 
         Args:
-            data: GitHub API 返回的原始数据
+            data: Raw data returned from GitHub API
 
         Returns:
-            GitHubRepo 实例
+            GitHubRepo instance
         """
         owner = data.get("owner", {})
         return cls(
@@ -214,9 +214,9 @@ class GitHubRepo(BaseModel):
 
 class GitHubSearchResult(BaseModel):
     """
-    GitHub 搜索结果数据模型
+    GitHub search result data model
 
-    封装 GitHub Search API 的响应结构。
+    Wraps the response structure of the GitHub Search API.
     """
 
     total_count: int = Field(0, description="匹配的仓库总数")
@@ -226,13 +226,13 @@ class GitHubSearchResult(BaseModel):
     @classmethod
     def from_api_response(cls, data: Dict[str, Any]) -> "GitHubSearchResult":
         """
-        从 GitHub API 响应数据创建实例
+        Create an instance from GitHub API response data
 
         Args:
-            data: GitHub Search API 返回的原始数据
+            data: Raw data returned from GitHub Search API
 
         Returns:
-            GitHubSearchResult 实例
+            GitHubSearchResult instance
         """
         items = [GitHubRepo.from_api_response(item) for item in data.get("items", [])]
         return cls(
@@ -243,10 +243,10 @@ class GitHubSearchResult(BaseModel):
 
     def to_markdown_table(self) -> str:
         """
-        将搜索结果转换为 Markdown 表格
+        Convert search results to a Markdown table
 
         Returns:
-            Markdown 格式的表格字符串
+            Markdown formatted table string
         """
         if not self.items:
             return "No results found."
@@ -256,7 +256,7 @@ class GitHubSearchResult(BaseModel):
             "|---|------------|-------|----------|-------------|",
         ]
 
-        for i, repo in enumerate(self.items[:10], 1):  # 最多显示 10 条
+        for i, repo in enumerate(self.items[:10], 1):  # Show at most 10 entries
             desc = (repo.description[:40] + "...") if len(repo.description) > 40 else repo.description
             desc = desc.replace("\n", " ")
             lines.append(
@@ -269,9 +269,9 @@ class GitHubSearchResult(BaseModel):
 
 class ToolResponse(BaseModel):
     """
-    通用工具响应包装类
+    Generic tool response wrapper
 
-    用于统一工具调用的返回格式，便于 Agent 处理。
+    Used to unify the return format of tool calls for easier Agent processing.
     """
 
     success: bool = Field(..., description="操作是否成功")
@@ -280,28 +280,28 @@ class ToolResponse(BaseModel):
 
     @classmethod
     def ok(cls, data: Any, message: str = "") -> "ToolResponse":
-        """创建成功响应"""
+        """Create a success response"""
         return cls(success=True, data=data, error_message=message)
 
     @classmethod
     def fail(cls, error_message: str, data: Any = None) -> "ToolResponse":
-        """创建失败响应"""
+        """Create a failure response"""
         return cls(success=False, data=data, error_message=error_message)
 
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
+        """Convert to dictionary"""
         return self.model_dump()
 
     def to_json(self) -> str:
-        """转换为 JSON 字符串"""
+        """Convert to JSON string"""
         return self.model_dump_json(indent=2)
 
 
 class ModelResponse(BaseModel):
     """
-    模型响应包装类
+    Model response wrapper
 
-    用于统一 LLM 调用的返回格式。
+    Used to unify the return format of LLM calls.
     """
 
     content: str = Field(..., description="响应内容")

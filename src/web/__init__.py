@@ -1,5 +1,5 @@
 # Web module
-"""Web 可视化仪表盘模块"""
+"""Web visualization dashboard module"""
 
 from .dashboard_api import app, run_dashboard
 

@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-GitHub MCP Mock 客户端
+GitHub MCP Mock client
 
-用于测试环境，模拟 GitHub MCP Server 的行为，不依赖真实二进制文件。
+For test environments, simulates GitHub MCP Server behavior without
+requiring a real binary.
 
-使用示例:
+Usage example:
     from src.mcp.github_mcp_mock import MockGitHubMCPClient
 
     client = MockGitHubMCPClient()
@@ -24,7 +25,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class MockTool:
-    """模拟工具定义"""
+    """Mock tool definition"""
     name: str
     description: str
     input_schema: Dict[str, Any]
@@ -32,28 +33,28 @@ class MockTool:
 
 class MockGitHubMCPClient:
     """
-    GitHub MCP Mock 客户端
+    GitHub MCP Mock client
 
-    模拟真实 MCP 客户端的接口，返回模拟数据。
-    用于单元测试和不依赖真实 GitHub API 的集成测试。
+    Simulates the real MCP client interface, returning mock data.
+    Used for unit tests and integration tests without a real GitHub API.
     """
 
     def __init__(self, github_token: Optional[str] = None):
         """
-        初始化 Mock 客户端
+        Initialize the Mock client
 
         Args:
-            github_token: GitHub Token（可选，仅用于兼容性）
+            github_token: GitHub Token (optional, for compatibility only)
         """
         self.github_token = github_token or "mock_token"
         self._connected = False
         self._tools: List[MockTool] = []
 
-        # 初始化模拟工具列表
+        # Initialize mock tool list
         self._init_mock_tools()
 
     def _init_mock_tools(self) -> None:
-        """初始化模拟工具"""
+        """Initialize mock tools"""
         self._tools = [
             MockTool(
                 name="search_repositories",
@@ -125,23 +126,23 @@ class MockGitHubMCPClient:
 
     @property
     def is_connected(self) -> bool:
-        """连接状态"""
+        """Connection status"""
         return self._connected
 
     async def connect(self) -> None:
-        """连接到 MCP Server（模拟）"""
-        await asyncio.sleep(0.1)  # 模拟连接延迟
+        """Connect to MCP Server (simulated)"""
+        await asyncio.sleep(0.1)  # Simulate connection delay
         self._connected = True
         logger.debug("Mock MCP Client connected")
 
     async def disconnect(self) -> None:
-        """断开连接"""
+        """Disconnect"""
         self._connected = False
         logger.debug("Mock MCP Client disconnected")
 
     async def list_tools(self) -> List[MockTool]:
-        """获取工具列表"""
-        await asyncio.sleep(0.05)  # 模拟延迟
+        """Get tool list"""
+        await asyncio.sleep(0.05)  # Simulate latency
         return self._tools
 
     async def call_tool(
@@ -150,18 +151,18 @@ class MockGitHubMCPClient:
         arguments: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        调用工具（返回模拟数据）
+        Call a tool (returns mock data)
 
         Args:
-            name: 工具名称
-            arguments: 工具参数
+            name: Tool name
+            arguments: Tool arguments
 
         Returns:
-            工具执行结果
+            Tool execution result
         """
-        await asyncio.sleep(0.1)  # 模拟执行延迟
+        await asyncio.sleep(0.1)  # Simulate execution delay
 
-        # 根据工具名称返回模拟数据
+        # Return mock data based on tool name
         if name == "search_repositories":
             return self._mock_search_repositories(arguments)
         elif name == "get_readme":
@@ -176,11 +177,11 @@ class MockGitHubMCPClient:
             return {"error": f"Unknown tool: {name}"}
 
     def _mock_search_repositories(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """模拟仓库搜索"""
+        """Simulate repository search"""
         query = args.get("query", "test")
         per_page = int(args.get("perPage", 5))
 
-        # 返回模拟搜索结果
+        # Return mock search results
         return {
             "total_count": 100,
             "items": [
@@ -198,7 +199,7 @@ class MockGitHubMCPClient:
         }
 
     def _mock_get_readme(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """模拟 README 获取"""
+        """Simulate README retrieval"""
         repo = args.get("repo", "project")  # noqa: F841
         owner = args.get("owner", "test")  # noqa: F841
 
@@ -237,7 +238,7 @@ MIT
         }
 
     def _mock_get_repo_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """模拟仓库信息获取"""
+        """Simulate repository info retrieval"""
         owner = args.get("owner", "test")
         repo = args.get("repo", "project")
 
@@ -254,7 +255,7 @@ MIT
         }
 
     def _mock_list_issues(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """模拟 issue 列表"""
+        """Simulate issue list"""
         return {
             "issues": [
                 {
@@ -273,7 +274,7 @@ MIT
         }
 
     def _mock_list_pull_requests(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """模拟 PR 列表"""
+        """Simulate PR list"""
         return {
             "pull_requests": [
                 {
@@ -292,29 +293,29 @@ MIT
         }
 
 
-# 便捷函数：创建 Mock 客户端或真实客户端
+# Convenience function: create a Mock client or a real client
 def create_mcp_client(
     github_token: Optional[str] = None,
     bin_path: Optional[str] = None,
     use_mock: bool = False,
 ):
     """
-    创建 MCP 客户端的工厂函数
+    Factory function to create an MCP client
 
     Args:
         github_token: GitHub Token
-        bin_path: MCP Server 二进制路径
-        use_mock: 是否使用 Mock 客户端
+        bin_path: MCP Server binary path
+        use_mock: Whether to use the Mock client
 
     Returns:
-        MCP 客户端实例
+        MCP client instance
     """
     if use_mock:
         return MockGitHubMCPClient(github_token)
 
-    # 尝试创建真实客户端
+    # Try creating a real client
     if bin_path is None:
-        # 如果没有指定路径且不使用 mock，返回 mock 客户端
+        # If no path specified and mock is not requested, return mock client
         logger.warning("MCP Server binary not specified, using Mock client")
         return MockGitHubMCPClient(github_token)
 

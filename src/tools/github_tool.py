@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-GitHub API 工具类
+GitHub API tool class
 
-功能:
-- 封装 GitHub REST API 调用
-- 支持仓库搜索、README 获取等
-- 统一的错误处理和重试机制
-- 防御性编程和类型安全
+Features:
+- Wraps GitHub REST API calls
+- Supports repository search, README retrieval, etc.
+- Unified error handling and retry mechanism
+- Defensive programming and type safety
 
-工程化要求:
-- 处理 HTTP 错误 (401, 403, 404)
-- 实现重试逻辑 (最多 3 次)
-- 返回类型化的 ToolResponse
+Engineering requirements:
+- Handle HTTP errors (401, 403, 404)
+- Implement retry logic (up to 3 times)
+- Return typed ToolResponse
 """
 
 import base64
@@ -32,21 +32,21 @@ logger = get_logger(__name__)
 
 class GitHubTool:
     """
-    GitHub API 工具类
+    GitHub API tool class
 
-    提供对 GitHub REST API v3 的封装，支持:
-    - 仓库搜索 (search_repositories)
-    - README 获取 (get_readme)
-    - 统一的错误处理和重试机制
+    Provides a wrapper around the GitHub REST API v3, supporting:
+    - Repository search (search_repositories)
+    - README retrieval (get_readme)
+    - Unified error handling and retry mechanism
 
     Attributes:
-        BASE_URL: GitHub API 基础 URL
-        MAX_RETRIES: 最大重试次数
-        RETRY_DELAY: 重试延迟 (秒)
+        BASE_URL: GitHub API base URL
+        MAX_RETRIES: Maximum number of retries
+        RETRY_DELAY: Retry delay (seconds)
     """
 
     BASE_URL = "https://api.github.com"
-    MAX_RETRIES = 5  # 增加到 5 次，配合指数退避
+    MAX_RETRIES = 5  # Increased to 5 with exponential backoff
     RETRY_DELAY = 1.0
 
     def __init__(
@@ -56,29 +56,29 @@ class GitHubTool:
         config: Optional[ConfigManager] = None,
     ):
         """
-        初始化工具类
+        Initialize the tool
 
         Args:
-            token: GitHub Personal Access Token，可从环境变量 GITHUB_TOKEN 读取
-            timeout: 请求超时时间 (秒)
-            config: 配置管理器实例
+            token: GitHub Personal Access Token, can be read from GITHUB_TOKEN environment variable
+            timeout: Request timeout (seconds)
+            config: Config manager instance
         """
         self._config = config or ConfigManager()
 
-        # 从配置或参数获取 token
+        # Get token from config or parameter
         self._token = token or self._config.github_token or os.getenv("GITHUB_TOKEN")
         self._timeout = timeout or self._config.github_timeout or 30
 
-        # 初始化弹性 HTTP 客户端（带指数退避、熔断、限流处理）
+        # Initialize resilient HTTP client (with exponential backoff, circuit breaker, rate limiting)
         self._http_client = ResilientHTTPClient(
             timeout=self._timeout,
             max_retries=self.MAX_RETRIES,
-            max_wait=60,  # 最大等待 60 秒
-            circuit_breaker_threshold=5,  # 5 次失败后打开熔断器
-            circuit_breaker_timeout=60,   # 熔断器 60 秒后尝试恢复
+            max_wait=60,  # Max wait 60 seconds
+            circuit_breaker_threshold=5,  # Open circuit breaker after 5 failures
+            circuit_breaker_timeout=60,   # Circuit breaker recovery after 60 seconds
         )
 
-        # 配置请求头
+        # Configure request headers
         self._headers = {
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "GitHub-Insight-Agent/0.1.0",
@@ -90,10 +90,10 @@ class GitHubTool:
         else:
             logger.warning("GitHub auth not configured. Rate limits may apply.")
 
-        # 速率限制配置
+        # Rate limit configuration
         self._rate_limit = self._config.github_rate_limit
         self._last_request_time: float = 0
-        self._rate_limit_remaining: int = -1  # -1 表示未知
+        self._rate_limit_remaining: int = -1  # -1 indicates unknown
         self._rate_limit_reset: int = 0
 
         logger.info(
@@ -102,7 +102,7 @@ class GitHubTool:
         )
 
     def _enforce_rate_limit(self) -> None:
-        """执行速率限制"""
+        """Enforce rate limiting"""
         if self._rate_limit <= 0:
             return
 
@@ -121,38 +121,38 @@ class GitHubTool:
         **kwargs,
     ) -> ToolResponse:
         """
-        发送 HTTP 请求 (带重试逻辑)
+        Send HTTP request (with retry logic)
 
-        使用 ResilientHTTPClient 提供:
-        - 指数退避重试
-        - 超时处理
-        - 429 限流优雅降级
-        - 熔断器模式
+        Uses ResilientHTTPClient to provide:
+        - Exponential backoff retry
+        - Timeout handling
+        - Graceful degradation for 429 rate limiting
+        - Circuit breaker pattern
 
         Args:
-            method: HTTP 方法
-            endpoint: API 端点
-            max_retries: 最大重试次数
-            **kwargs: 传递给 requests 的参数
+            method: HTTP method
+            endpoint: API endpoint
+            max_retries: Maximum number of retries
+            **kwargs: Parameters passed to requests
 
         Returns:
-            ToolResponse 包装的响应
+            ToolResponse-wrapped response
         """
         url = f"{self.BASE_URL}{endpoint}"
 
-        # 合并请求头
+        # Merge request headers
         headers = self._headers.copy()
         if "headers" in kwargs:
             headers.update(kwargs["headers"])
             del kwargs["headers"]
 
         try:
-            # 执行限流控制
+            # Execute rate limit control
             self._enforce_rate_limit()
 
             logger.debug(f"Request: {method} {url}")
 
-            # 使用弹性 HTTP 客户端发送请求
+            # Send request using resilient HTTP client
             response = self._http_client.request(
                 method,
                 url,
@@ -161,7 +161,7 @@ class GitHubTool:
                 **kwargs,
             )
 
-            # 提取速率限制信息
+            # Extract rate limit information
             self._rate_limit_remaining = int(
                 response.headers.get("X-RateLimit-Remaining", -1)
             )
@@ -169,7 +169,7 @@ class GitHubTool:
                 response.headers.get("X-RateLimit-Reset", 0)
             )
 
-            # 成功响应
+            # Successful response
             return ToolResponse.ok(data=response.json())
 
         except RateLimitError as e:
@@ -183,7 +183,7 @@ class GitHubTool:
             error_msg = str(e)
             logger.error(f"Request failed: {error_msg}")
 
-            # 提取具体错误信息
+            # Extract specific error information
             if "401" in error_msg or "Unauthorized" in error_msg:
                 return ToolResponse.fail(
                     error_message="Unauthorized: Invalid or expired GitHub token",
@@ -211,19 +211,19 @@ class GitHubTool:
         per_page: int = 10,
     ) -> List[GitHubRepo]:
         """
-        搜索 GitHub 仓库
+        Search GitHub repositories
 
         Args:
-            query: 搜索关键词
-            sort: 排序字段 (stars/forks/updated)
-            order: 排序顺序 (asc/desc)
-            per_page: 每页数量 (最多 100)
+            query: Search keyword
+            sort: Sort field (stars/forks/updated)
+            order: Sort order (asc/desc)
+            per_page: Number per page (max 100)
 
         Returns:
-            GitHubRepo 列表
+            List of GitHubRepo
 
         Raises:
-            RuntimeError: API 调用失败时抛出
+            RuntimeError: Raised when API call fails
         """
         logger.info(f"Searching repositories: '{query}' (sort={sort}, order={order})")
 
@@ -232,7 +232,7 @@ class GitHubTool:
             "q": query,
             "sort": sort,
             "order": order,
-            "per_page": min(per_page, 100),  # GitHub API 限制
+            "per_page": min(per_page, 100),  # GitHub API limit
         }
 
         response = self._request_with_retry("GET", endpoint, params=params)
@@ -240,7 +240,7 @@ class GitHubTool:
         if not response.success:
             raise RuntimeError(f"GitHub API error: {response.error_message}")
 
-        # 解析为类型化的结果
+        # Parse into typed result
         search_result = GitHubSearchResult.from_api_response(response.data)
         logger.info(f"Found {search_result.total_count} repositories")
 
@@ -248,19 +248,19 @@ class GitHubTool:
 
     def get_readme(self, owner: str, repo: str, ref: str = "HEAD") -> str:
         """
-        获取指定仓库的 README 内容
+        Get the README content of a specified repository
 
         Args:
-            owner: 仓库所有者 (用户名或组织名)
-            repo: 仓库名称
-            ref: 分支名或提交 SHA，默认 HEAD
+            owner: Repository owner (username or organization)
+            repo: Repository name
+            ref: Branch name or commit SHA, default HEAD
 
         Returns:
-            README 的纯文本内容
+            Plain text content of the README
 
         Raises:
-            RuntimeError: API 调用失败时抛出
-            ValueError: README 不存在时抛出
+            RuntimeError: Raised when API call fails
+            ValueError: Raised when README does not exist
         """
         logger.info(f"Fetching README: {owner}/{repo} (ref={ref})")
 
@@ -274,7 +274,7 @@ class GitHubTool:
                 raise ValueError(f"Repository '{owner}/{repo}' not found or has no README")
             raise RuntimeError(f"GitHub API error: {response.error_message}")
 
-        # 解码 base64 内容
+        # Decode base64 content
         try:
             content_base64 = response.data.get("content", "")
             content = base64.b64decode(content_base64).decode("utf-8")
@@ -286,18 +286,18 @@ class GitHubTool:
 
     def get_repo_info(self, owner: str, repo: str) -> GitHubRepo:
         """
-        获取单个仓库的详细信息
+        Get detailed information for a single repository
 
         Args:
-            owner: 仓库所有者
-            repo: 仓库名称
+            owner: Repository owner
+            repo: Repository name
 
         Returns:
-            GitHubRepo 实例
+            GitHubRepo instance
 
         Raises:
-            RuntimeError: API 调用失败时抛出
-            ValueError: 仓库不存在时抛出
+            RuntimeError: Raised when API call fails
+            ValueError: Raised when repository does not exist
         """
         logger.info(f"Fetching repo info: {owner}/{repo}")
 
@@ -313,13 +313,13 @@ class GitHubTool:
 
     def check_rate_limit(self) -> Dict[str, Any]:
         """
-        检查当前 API 速率限制状态
+        Check current API rate limit status
 
         Returns:
-            速率限制信息字典
+            Dictionary of rate limit information
         """
         if not self._token:
-            # 未认证请求
+            # Unauthenticated request
             return {
                 "limit": 60,
                 "remaining": "unknown",
@@ -345,63 +345,63 @@ class GitHubTool:
     @staticmethod
     def clean_readme_text(content: str, max_length: int = 5000) -> str:
         """
-        清洗 README 内容，去除 Markdown 符号
+        Clean README content by removing Markdown symbols
 
         Args:
-            content: 原始 README 内容
-            max_length: 最大字符数，超过则截取前 N 字符
+            content: Raw README content
+            max_length: Maximum character count; truncates to first N characters if exceeded
 
         Returns:
-            清洗后的纯文本
+            Cleaned plain text
         """
-        # 如果内容过长，先截取
+        # Truncate if content is too long
         if len(content) > max_length:
             content = content[:max_length]
-            # 尝试在完整行处截断
+            # Try to truncate at a complete line
             newline_pos = content.rfind("\n")
             if newline_pos > max_length - 500:
                 content = content[:newline_pos]
 
         text = content
 
-        # 移除代码块 ```xxx ... ```
+        # Remove code blocks ```xxx ... ```
         text = re.sub(r"```[\s\S]*?```", "", text)
 
-        # 移除行内代码 `xxx`
+        # Remove inline code `xxx`
         text = re.sub(r"`([^`]+)`", r"\1", text)
 
-        # 移除标题标记 ###
+        # Remove heading markers ###
         text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
 
-        # 移除粗体 **xxx**
+        # Remove bold **xxx**
         text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
 
-        # 移除斜体 *xxx*
+        # Remove italic *xxx*
         text = re.sub(r"\*([^*]+)\*", r"\1", text)
 
-        # 移除链接 [text](url) -> text
+        # Remove links [text](url) -> text
         text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
 
-        # 移除图片 ![alt](url)
+        # Remove images ![alt](url)
         text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
 
-        # 移除引用 >
+        # Remove quotes >
         text = re.sub(r"^>\s*", "", text, flags=re.MULTILINE)
 
-        # 移除列表标记 - 或 * 或 1.
+        # Remove list markers - or * or 1.
         text = re.sub(r"^[\s]*[-*+]\s*", "", text, flags=re.MULTILINE)
         text = re.sub(r"^[\s]*\d+\.\s*", "", text, flags=re.MULTILINE)
 
-        # 移除水平线 ---
+        # Remove horizontal rules ---
         text = re.sub(r"^---$", "", text, flags=re.MULTILINE)
 
-        # 移除 HTML 标签
+        # Remove HTML tags
         text = re.sub(r"<[^>]+>", "", text)
 
-        # 移除多余空白行（超过 2 个连续空行缩减为 1 个）
+        # Remove excess blank lines (more than 2 consecutive blank lines reduced to 1)
         text = re.sub(r"\n{3,}", "\n\n", text)
 
-        # 清理每行首尾空白
+        # Trim leading/trailing whitespace on each line
         lines = [line.strip() for line in text.split("\n")]
         text = "\n".join(lines)
 
@@ -409,42 +409,42 @@ class GitHubTool:
 
     def get_project_summary(self, owner: str, repo: str, max_readme_length: int = 5000) -> Dict[str, Any]:
         """
-        获取项目的综合摘要信息
+        Get a comprehensive project summary
 
-        组合调用多个 API，获取项目的详细信息，包括：
-        - 基本信息（名称、stars、语言）
-        - README 内容（已清洗为纯文本）
+        Combines multiple API calls to get detailed project information including:
+        - Basic info (name, stars, language)
+        - README content (cleaned to plain text)
 
         Args:
-            owner: 仓库所有者
-            repo: 仓库名称
-            max_readme_length: README 最大字符数（默认 5000，防止 Token 超限）
+            owner: Repository owner
+            repo: Repository name
+            max_readme_length: README maximum character count (default 5000, to prevent Token overflow)
 
         Returns:
-            包含以下字段的字典:
-            - name: 仓库名称
-            - full_name: 完整名称
+            Dictionary with the following fields:
+            - name: Repository name
+            - full_name: Full name
             - html_url: GitHub URL
-            - stars: Star 数量
-            - language: 主要编程语言
-            - description: 简介
-            - topics: 主题标签
-            - cleaned_readme_text: 清洗后的 README 纯文本
-            - readme_truncated: README 是否被截断
+            - stars: Star count
+            - language: Primary programming language
+            - description: Description
+            - topics: Topic tags
+            - cleaned_readme_text: Cleaned README plain text
+            - readme_truncated: Whether README was truncated
 
         Raises:
-            RuntimeError: API 调用失败时抛出
+            RuntimeError: Raised when API call fails
         """
         logger.info(f"Fetching project summary: {owner}/{repo}")
 
-        # 获取仓库信息
+        # Fetch repository info
         try:
             repo_info = self.get_repo_info(owner, repo)
         except RuntimeError as e:
             logger.error(f"Failed to get repo info: {e}")
             raise
 
-        # 获取 README
+        # Fetch README
         readme_text = ""
         readme_truncated = False
         try:
@@ -460,7 +460,7 @@ class GitHubTool:
             logger.warning(f"Failed to fetch README: {e}")
 
         summary = {
-            "name": repo_info.full_name.split("/")[-1],  # 从 full_name 提取仓库名
+            "name": repo_info.full_name.split("/")[-1],  # Extract repo name from full_name
             "full_name": repo_info.full_name,
             "html_url": repo_info.html_url,
             "stars": repo_info.stargazers_count,

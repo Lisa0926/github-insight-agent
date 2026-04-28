@@ -1,5 +1,5 @@
 # Types module
-"""类型定义模块：Pydantic 数据模型"""
+"""Type definitions module: Pydantic data models"""
 
 from .schemas import GitHubRepoInfo, GitHubIssueInfo, GitHubPRInfo
 

@@ -1,5 +1,5 @@
 # Tools module
-"""工具集模块：GitHub API、数据分析等工具"""
+"""Tools module: GitHub API, data analysis, and other utilities"""
 
 from .github_tool import GitHubTool
 from .tool_registry import ToolRegistry, global_registry, register_github_tools, ToolInfo

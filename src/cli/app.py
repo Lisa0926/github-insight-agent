@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-GitHub Insight Agent - 增强版 CLI 入口
+GitHub Insight Agent - Enhanced CLI Entry Point
 
-功能:
-- 彩色友好输出
-- 命令自动补全
-- 进度条显示
-- 结构化报告展示
+Features:
+- Colored friendly output
+- Command auto-completion
+- Progress bar display
+- Structured report display
 """
 
 import sys
 from pathlib import Path
 
-# 添加项目根目录到 Python 路径
+# Add project root directory to Python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -20,11 +20,11 @@ from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
 from src.core.config_manager import ConfigManager  # noqa: E402
-from src.workflows.report_generator import ReportGenerator  # noqa: E402
+from src.workflows.agent_pipeline import AgentPipeline  # noqa: E402
 
 
 def print_welcome():
-    """打印欢迎信息"""
+    """Print welcome message"""
     renderer.print_banner()
 
     commands = {
@@ -41,7 +41,7 @@ def print_welcome():
     }
     renderer.print_help(commands)
 
-    # 自然语言提示
+    # Natural language hint
     renderer.print_info(
         "💡 支持自然语言输入，例如：\n"
         "  • '为我搜索最近一周内 star 最高的 3 个 Python 项目'\n"
@@ -56,7 +56,7 @@ def print_welcome():
 
 
 def check_environment():
-    """检查环境配置"""
+    """Check environment configuration"""
     config = ConfigManager()
 
     has_api_key = bool(config.dashscope_api_key)
@@ -77,50 +77,48 @@ def check_environment():
 
     if not has_api_key:
         renderer.print_warning("DashScope API Key 未配置（分析报告功能需要有效的 API Key）")
-        renderer.print_info("请检查 ~/.env 中的 DASHSCOPE_API_KEY 变量")
+        renderer.print_info("请检查 ~/.env 中的 GIA_DASHSCOPE_API_KEY 变量")
 
-    # 验证 API Key 是否有效（发送一次轻量请求）
+    # Verify if the API Key is valid (using the same DashScopeWrapper as GIA)
     if has_api_key:
         try:
-            import dashscope
-            from dashscope import Generation
-            dashscope.api_key = config.dashscope_api_key
-            if config.dashscope_base_url:
-                dashscope.base_url = config.dashscope_base_url
-            resp = Generation.call(
-                model=config.dashscope_model_name,
-                messages=[{"role": "user", "content": "Hi"}],
-                max_tokens=5,
+            from src.core.dashscope_wrapper import DashScopeWrapper
+            wrapper = DashScopeWrapper(
+                model_name=config.dashscope_model_name,
+                api_key=config.dashscope_api_key,
+                base_url=config.dashscope_base_url,
             )
-            if resp.status_code != 200:
-                code = getattr(resp, 'code', 'Unknown')
-                msg = getattr(resp, 'message', 'Unknown error')
-                renderer.print_warning(f"DashScope API Key 验证失败: {code} - {msg}")
-                if code == "InvalidApiKey":
-                    renderer.print_info(f"模型: {config.dashscope_model_name}")
-                    base_url = getattr(dashscope, 'base_url', 'default')
-                    renderer.print_info(f"端点: {base_url}")
-                    renderer.print_info("如使用代理或自定义端点，请设置 DASHSCOPE_BASE_URL 环境变量")
+            resp = wrapper(messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hi"},
+            ], max_tokens=5)
+            content = resp.get("content", "")
+            if content and not content.startswith("Error"):
+                renderer.print_success("DashScope API Key 验证通过")
+            else:
+                renderer.print_warning(f"DashScope API Key 验证失败: {content}")
         except Exception as e:
             renderer.print_warning(f"API Key 验证失败: {e}")
+            renderer.print_info(f"模型: {config.dashscope_model_name}")
+            renderer.print_info(f"端点: {config.dashscope_base_url}")
 
 
 def run_interactive_mode():  # noqa: C901
-    """运行交互模式"""
+    """Run interactive mode"""
     from src.agents.researcher_agent import set_studio_config as set_researcher_studio
     from src.agents.analyst_agent import set_studio_config as set_analyst_studio
 
     config = ConfigManager()
     nl_parser = NaturalLanguageParser()
 
-    # 设置 Studio 配置
+    # Set up Studio configuration
     if config.agentscope_enable_studio:
         set_researcher_studio(config.agentscope_studio_url, config.agentscope_run_name)
         set_analyst_studio(config.agentscope_studio_url, config.agentscope_run_name)
         renderer.print_info(f"Studio 已启用 (run_id: {config.agentscope_run_name})")
 
-    # 初始化报告生成器
-    report_gen = ReportGenerator()
+    # Initialize report generator
+    report_gen = AgentPipeline()
 
     while True:
         try:
@@ -205,7 +203,7 @@ def run_interactive_mode():  # noqa: C901
                 elif command == "/report":
                     query = args if args else "Rust AI framework"
                     renderer.print_loading(f"生成报告：{query}")
-                    # TODO: 实现报告生成工作流
+                    # TODO: Implement report generation workflow
                     renderer.print_success("报告生成中...（功能开发中）")
 
                 elif command == "/history":
@@ -225,7 +223,7 @@ def run_interactive_mode():  # noqa: C901
 
                 elif command == "/export":
                     path = args if args else "reports/conversation.md"
-                    # TODO: 实现导出功能
+                    # TODO: Implement export functionality
                     renderer.print_success(f"对话已导出到：{path}（功能开发中）")
 
                 elif command == "/config":
@@ -238,7 +236,7 @@ def run_interactive_mode():  # noqa: C901
                     renderer.print_stats(stats, title="当前配置")
 
                 elif command == "/pr":
-                    # TODO: PR 审查功能
+                    # TODO: PR review functionality
                     renderer.print_panel(
                         "💡 提示",
                         "请使用独立命令启动 PR 审查：\n  python run_pr_review.py\n\n"
@@ -247,25 +245,25 @@ def run_interactive_mode():  # noqa: C901
                     )
 
                 elif command == "/scan":
-                    # TODO: 安全扫描功能
+                    # TODO: Security scanning functionality
                     renderer.print_success("安全扫描功能开发中")
 
                 else:
                     renderer.print_error(f"未知命令：{command}", "输入 /help 查看可用命令")
 
             else:
-                # 自然语言输入 - 智能识别意图
+                # Natural language input - intelligent intent recognition
                 has_context = bool(report_gen._current_projects)
                 parsed = nl_parser.parse(user_input, has_context=has_context)
 
                 if parsed.intent == IntentType.FOLLOWUP and has_context:
-                    # 追问模式
+                    # Follow-up mode
                     with renderer.create_progress("Agent 思考中..."):
                         response = report_gen.handle_followup(user_input)
                     renderer.print_panel("🤖 Agent", response, style="cyan")
 
                 elif parsed.intent == IntentType.ANALYZE:
-                    # 分析单个项目
+                    # Analyze a single project
                     query_parts = parsed.query.split("/")
                     if len(query_parts) == 2:
                         owner, repo = query_parts
@@ -287,7 +285,7 @@ def run_interactive_mode():  # noqa: C901
                         renderer.print_warning("无法识别项目名，请使用 owner/repo 格式")
 
                 elif parsed.intent == IntentType.SEARCH:
-                    # 搜索项目
+                    # Search projects
                     query = parsed.query
                     time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
                     with renderer.create_progress(f"搜索：{query}{time_desc}"):
@@ -313,7 +311,7 @@ def run_interactive_mode():  # noqa: C901
                         renderer.print_warning("未找到相关项目")
 
                 elif parsed.intent == IntentType.REPORT:
-                    # 生成详细报告
+                    # Generate detailed report
                     query = parsed.query
                     time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
                     with renderer.create_progress(f"生成报告：{query}{time_desc}"):
@@ -323,7 +321,7 @@ def run_interactive_mode():  # noqa: C901
                             sort=parsed.sort_by,
                         )
                     renderer.print_success("报告生成完成！")
-                    # 显示完整报告（截断超过 10000 字符的超长报告）
+                    # Display full report (truncate reports exceeding 10,000 characters)
                     display_limit = 10000
                     if len(report) > display_limit:
                         renderer.print_panel("📄 报告", report[:display_limit])
@@ -332,7 +330,7 @@ def run_interactive_mode():  # noqa: C901
                         renderer.print_panel("📄 报告", report)
 
                 else:
-                    # 未知意图，尝试当作搜索处理
+                    # Unknown intent, try to handle as search
                     with renderer.create_progress(f"搜索：{user_input}"):
                         search_result = report_gen.researcher.search_and_analyze(
                             query=user_input,
@@ -356,14 +354,14 @@ def run_interactive_mode():  # noqa: C901
 
 
 def main():
-    """主入口"""
-    # 欢迎信息
+    """Main entry point"""
+    # Welcome message
     print_welcome()
 
-    # 环境检查
+    # Environment check
     check_environment()
 
-    # 交互模式
+    # Interactive mode
     print("\n")
     renderer.print_panel("开始使用", "输入命令或直接输入问题开始分析", style="green")
     run_interactive_mode()

@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-代码质量/安全评分工具
+Code quality/security scoring tool
 
-功能:
-- 基于 LLM 分析 GitHub 仓库的代码质量和安全最佳实践
-- 生成质量评分 (1-5 分) 和安全评分 (1-5 分)
-- 输出结构化评估报告
+Features:
+- LLM-based analysis of GitHub repository code quality and security best practices
+- Generates quality score (1-5) and security score (1-5)
+- Outputs structured evaluation reports
 
-评估维度:
-1. 代码质量
-   - 文档完整性 (README、文档站点)
-   - 测试覆盖 (测试文件存在性)
-   - 代码规范 (linting 配置)
-   - CI/CD 成熟度
-   - 社区活跃度
+Evaluation dimensions:
+1. Code quality
+   - Documentation completeness (README, docs site)
+   - Test coverage (test file existence)
+   - Code standards (linting configuration)
+   - CI/CD maturity
+   - Community activity
 
-2. 安全最佳实践
-   - 安全策略文件 (SECURITY.md)
-   - 依赖管理 (requirements.txt, package.json)
-   - 许可证清晰度
-   - 漏洞响应机制
-   - 敏感信息泄露风险
+2. Security best practices
+   - Security policy file (SECURITY.md)
+   - Dependency management (requirements.txt, package.json)
+   - License clarity
+   - Vulnerability response mechanism
+   - Sensitive information leak risk
 """
 
 import json
@@ -36,39 +36,39 @@ logger = get_logger(__name__)
 
 class CodeQualityScorer:
     """
-    代码质量/安全评分器
+    Code quality/security scorer
 
-    基于项目元数据和 README 内容，使用 LLM 进行智能评估。
+    Uses LLM-based intelligent evaluation based on project metadata and README content.
     """
 
-    # 评估维度权重
+    # Evaluation dimension weights
     QUALITY_DIMENSIONS = {
-        "documentation": 0.20,      # 文档完整性
-        "testing": 0.20,            # 测试覆盖
-        "code_standards": 0.15,     # 代码规范
-        "ci_cd": 0.15,              # CI/CD 成熟度
-        "community": 0.15,          # 社区活跃度
-        "maintenance": 0.15,        # 维护活跃
+        "documentation": 0.20,      # Documentation completeness
+        "testing": 0.20,            # Test coverage
+        "code_standards": 0.15,     # Code standards
+        "ci_cd": 0.15,              # CI/CD maturity
+        "community": 0.15,          # Community activity
+        "maintenance": 0.15,        # Maintenance activity
     }
 
     SECURITY_DIMENSIONS = {
-        "security_policy": 0.25,    # 安全策略文件
-        "dependency_management": 0.20,  # 依赖管理
-        "license_clarity": 0.15,    # 许可证清晰度
-        "vulnerability_response": 0.20,  # 漏洞响应
-        "secret_exposure": 0.20,    # 敏感信息泄露
+        "security_policy": 0.25,    # Security policy file
+        "dependency_management": 0.20,  # Dependency management
+        "license_clarity": 0.15,    # License clarity
+        "vulnerability_response": 0.20,  # Vulnerability response
+        "secret_exposure": 0.20,    # Sensitive information leak
     }
 
     def __init__(self, config: Optional[ConfigManager] = None):
         """
-        初始化评分器
+        Initialize the scorer
 
         Args:
-            config: 配置管理器实例
+            config: Config manager instance
         """
         self._config = config or ConfigManager()
 
-        # 获取 LLM Provider（使用默认配置）
+        # Get LLM Provider (using default config)
         provider_name = self._config.llm_provider.lower() if hasattr(self._config, 'llm_provider') else 'dashscope'
         api_key = self._config.dashscope_api_key if provider_name == 'dashscope' else None
         model = self._config.dashscope_model_name if provider_name == 'dashscope' else None
@@ -83,17 +83,17 @@ class CodeQualityScorer:
 
     def _detect_quality_signals(self, readme_content: str, repo_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        从 README 和仓库信息中检测质量信号
+        Detect quality signals from README and repository info
 
         Args:
-            readme_content: README 内容
-            repo_info: 仓库元数据
+            readme_content: README content
+            repo_info: Repository metadata
 
         Returns:
-            检测到的信号字典
+            Dictionary of detected signals
         """
         signals = {
-            # 文档信号
+            # Documentation signals
             "has_readme": True,
             "has_badges": any(badge in readme_content.lower() for badge in [
                 "[!", "![", "shield", "badge", "travis", "circleci", "codecov"
@@ -108,7 +108,7 @@ class CodeQualityScorer:
                 "example", "usage", "demo", "sample", "tutorial"
             ]),
 
-            # 测试信号
+            # Test signals
             "has_tests": any(keyword in readme_content.lower() for keyword in [
                 "test", "spec", "coverage", "pytest", "unittest", "jest", "mocha"
             ]),
@@ -117,19 +117,19 @@ class CodeQualityScorer:
             ]),
             "has_codecov": "codecov" in readme_content.lower() or "coveralls" in readme_content.lower(),
 
-            # 代码规范信号
+            # Code standards signals
             "has_linting": any(lint in readme_content.lower() for lint in [
                 "ruff", "flake8", "pylint", "eslint", "black", "prettier"
             ]),
             "has_type_hints": "typing" in readme_content.lower() or "type hints" in readme_content.lower(),
 
-            # CI/CD 信号
+            # CI/CD signals
             "has_github_actions": ".github" in readme_content.lower() or "github actions" in readme_content.lower(),
             "has_deploy_guide": any(keyword in readme_content.lower() for keyword in [
                 "deploy", "deployment", "production", "release"
             ]),
 
-            # 社区信号
+            # Community signals
             "has_contributing": "contributing" in readme_content.lower() or "contribute" in readme_content.lower(),
             "has_code_of_conduct": "code of conduct" in readme_content.lower(),
             "has_issue_template": "issue template" in readme_content.lower(),
@@ -137,7 +137,7 @@ class CodeQualityScorer:
             "forks": repo_info.get("forks", 0),
             "open_issues": repo_info.get("open_issues", 0),
 
-            # 安全信号
+            # Security signals
             "has_security_policy": "security" in readme_content.lower() or "security.md" in readme_content.lower(),
             "has_license": bool(repo_info.get("license")),
             "license_type": repo_info.get("license", "Unknown"),
@@ -146,7 +146,7 @@ class CodeQualityScorer:
             ]),
         }
 
-        # 计算派生指标
+        # Compute derived metrics
         signals["fork_rate"] = signals["forks"] / max(signals["stars"], 1)
         signals["issue_attention"] = signals["open_issues"] / max(signals["stars"], 1) * 100
 
@@ -154,18 +154,18 @@ class CodeQualityScorer:
 
     def _calculate_rule_based_score(self, signals: Dict[str, Any]) -> Dict[str, float]:  # noqa: C901
         """
-        基于规则的初步评分
+        Rule-based preliminary scoring
 
         Args:
-            signals: 检测到的信号
+            signals: Detected signals
 
         Returns:
-            各维度得分字典
+            Dictionary of per-dimension scores
         """
-        # 质量评分 (0-5)
+        # Quality score (0-5)
         quality_score = 0.0
 
-        # 文档 (1 分)
+        # Documentation (1 point)
         if signals["has_readme"]:
             quality_score += 0.2
         if signals["has_badges"]:
@@ -177,7 +177,7 @@ class CodeQualityScorer:
         if signals["has_examples"]:
             quality_score += 0.2
 
-        # 测试 (1 分)
+        # Testing (1 point)
         if signals["has_tests"]:
             quality_score += 0.4
         if signals["has_ci_badge"]:
@@ -185,19 +185,19 @@ class CodeQualityScorer:
         if signals["has_codecov"]:
             quality_score += 0.3
 
-        # 代码规范 (1 分)
+        # Code standards (1 point)
         if signals["has_linting"]:
             quality_score += 0.5
         if signals["has_type_hints"]:
             quality_score += 0.5
 
-        # CI/CD (1 分)
+        # CI/CD (1 point)
         if signals["has_github_actions"]:
             quality_score += 0.5
         if signals["has_deploy_guide"]:
             quality_score += 0.5
 
-        # 社区 (1 分)
+        # Community (1 point)
         if signals["has_contributing"]:
             quality_score += 0.34
         if signals["has_code_of_conduct"]:
@@ -205,32 +205,32 @@ class CodeQualityScorer:
         if signals["has_issue_template"]:
             quality_score += 0.33
 
-        # 安全评分 (0-5)
+        # Security score (0-5)
         security_score = 0.0
 
-        # 安全策略 (1.25 分)
+        # Security policy (1.25 points)
         if signals["has_security_policy"]:
             security_score += 1.25
 
-        # 依赖管理 (1 分)
+        # Dependency management (1 point)
         if signals["has_dependencies"]:
             security_score += 0.5
         if signals["has_license"]:
             security_score += 0.5
 
-        # 许可证清晰度 (0.75 分)
+        # License clarity (0.75 points)
         if signals["license_type"] not in ["Unknown", "Other"]:
             security_score += 0.75
 
-        # 社区健康 (1 分) - 间接反映安全关注度
+        # Community health (1 point) - indirectly reflects security attention
         if 0.05 <= signals["fork_rate"] <= 0.5:
             security_score += 0.5
         if signals["issue_attention"] < 5:
             security_score += 0.5
 
-        # 扣分项：可疑信号
+        # Deductions: suspicious signals
         if signals["issue_attention"] > 20:
-            security_score -= 0.5  # 太多未解决问题可能表示维护不善
+            security_score -= 0.5  # Too many open issues may indicate poor maintenance
 
         return {
             "quality_rule_based": min(5.0, max(0.0, quality_score)),
@@ -244,15 +244,15 @@ class CodeQualityScorer:
         rule_scores: Dict[str, float],
     ) -> Dict[str, Any]:
         """
-        使用 LLM 进行增强评估
+        Use LLM for enhanced evaluation
 
         Args:
-            readme_content: README 内容
-            repo_info: 仓库信息
-            rule_scores: 基于规则的评分
+            readme_content: README content
+            repo_info: Repository info
+            rule_scores: Rule-based scores
 
         Returns:
-            LLM 增强评估结果
+            LLM-enhanced evaluation result
         """
         if self._llm_provider is None:
             logger.warning("LLM provider not available, using rule-based scoring")
@@ -305,13 +305,13 @@ class CodeQualityScorer:
                 {"role": "user", "content": prompt},
             ])
 
-            # 解析 JSON 响应
+            # Parse JSON response
             import re
             json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response)
             if json_match:
                 result = json.loads(json_match.group(1))
             else:
-                # 尝试直接解析
+                # Try direct parsing
                 result = json.loads(response)
 
             return {
@@ -325,7 +325,7 @@ class CodeQualityScorer:
             }
 
         except Exception as e:
-            logger.warning(f"LLM 评估失败，使用规则评分：{e}")
+            logger.warning(f"LLM evaluation failed, using rule-based scoring: {e}")
             return {
                 "quality_llm": rule_scores.get("quality_rule_based", 2.5),
                 "security_llm": rule_scores.get("security_rule_based", 2.5),
@@ -343,25 +343,25 @@ class CodeQualityScorer:
         use_llm: bool = True,
     ) -> Dict[str, Any]:
         """
-        综合评估项目质量和安全
+        Comprehensive project quality and security evaluation
 
         Args:
-            readme_content: README 内容
-            repo_info: 仓库信息
-            use_llm: 是否使用 LLM 增强评估
+            readme_content: README content
+            repo_info: Repository info
+            use_llm: Whether to use LLM-enhanced evaluation
 
         Returns:
-            综合评估结果
+            Comprehensive evaluation result
         """
         logger.info(f"Evaluating code quality: {repo_info.get('full_name', 'Unknown')}")
 
-        # 步骤 1: 检测质量信号
+        # Step 1: Detect quality signals
         signals = self._detect_quality_signals(readme_content, repo_info)
 
-        # 步骤 2: 基于规则评分
+        # Step 2: Rule-based scoring
         rule_scores = self._calculate_rule_based_score(signals)
 
-        # 步骤 3: LLM 增强评估（可选）
+        # Step 3: LLM-enhanced evaluation (optional)
         if use_llm:
             llm_result = await self._llm_enhanced_score(readme_content, repo_info, rule_scores)
             final_quality = (rule_scores["quality_rule_based"] + llm_result["quality_llm"]) / 2
@@ -376,7 +376,7 @@ class CodeQualityScorer:
                 "assessment": "基于规则的自动评分",
             }
 
-        # 构建最终报告
+        # Build final report
         report = {
             "quality_score": round(final_quality, 2),
             "security_score": round(final_security, 2),
@@ -413,22 +413,22 @@ async def evaluate_code_quality(
     config: Optional[ConfigManager] = None,
 ) -> ToolResponse:
     """
-    评估代码质量和安全（工具函数）
+    Evaluate code quality and security (tool function)
 
     Args:
-        readme_content: README 内容
-        repo_info: 仓库信息
-        use_llm: 是否使用 LLM 增强
-        config: 配置管理器
+        readme_content: README content
+        repo_info: Repository info
+        use_llm: Whether to use LLM enhancement
+        config: Config manager
 
     Returns:
-        ToolResponse 包装的评估结果
+        Evaluation result wrapped in ToolResponse
     """
     try:
         scorer = CodeQualityScorer(config=config)
         result = await scorer.evaluate(readme_content, repo_info, use_llm=use_llm)
 
-        # 格式化为人类可读的报告
+        # Format as human-readable report
         report_text = f"""## 代码质量评估报告
 
 **项目**: {repo_info.get('full_name', 'Unknown')}

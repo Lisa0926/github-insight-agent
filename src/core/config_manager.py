@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-配置加载器 - ConfigManager 单例类
+Configuration loader - ConfigManager singleton class
 
-功能:
-- 读取 configs/model_configs.json 配置文件
-- 支持环境变量覆盖敏感配置 (如 API Key)
-- 提供统一的配置访问接口
+Features:
+- Read configuration from configs/model_configs.json
+- Support environment variable overrides for sensitive config (e.g. API Key)
+- Provide a unified configuration access interface
 
-使用类型驱动设计，确保配置数据的类型安全。
+Uses type-driven design to ensure type safety of configuration data.
 """
 
 import json
@@ -19,12 +19,12 @@ from dotenv import load_dotenv
 
 class ConfigManager:
     """
-    配置管理器单例类
+    Configuration manager singleton class
 
-    负责加载和管理项目的全局配置，支持:
-    1. 从 JSON 文件加载配置
-    2. 环境变量覆盖 (优先于文件配置)
-    3. 配置热刷新
+    Responsible for loading and managing the project's global configuration, supports:
+    1. Load configuration from JSON file
+    2. Environment variable overrides (takes precedence over file config)
+    3. Configuration hot refresh
     """
 
     _instance: Optional["ConfigManager"] = None
@@ -47,19 +47,19 @@ class ConfigManager:
         ConfigManager._initialized = True
 
     def _load_env(self) -> None:
-        """加载 .env 文件中的环境变量
+        """Load environment variables from .env file
 
-        加载顺序:
-        1. 全局 .env (包含共享的 API Keys) - 路径由 GLOBAL_ENV 环境变量指定，默认为 ~/.env
-        2. 项目 .env (项目特定配置，可覆盖全局配置)
+        Load order:
+        1. Global .env (contains shared API Keys) - path specified by GLOBAL_ENV env var, defaults to ~/.env
+        2. Project .env (project-specific config, overrides global config)
         """
-        # 1. 先加载全局 .env (如果存在)
+        # 1. Load global .env first (if exists)
         global_env_path = Path(os.environ.get("GLOBAL_ENV", Path.home() / ".env"))
         if global_env_path.exists():
             load_dotenv(global_env_path)
             self._env_loaded = True
 
-        # 2. 再加载项目 .env (可覆盖全局配置) - 仅当明确允许时
+        # 2. Load project .env (overrides global config) - only when explicitly allowed
         project_env_path = Path(__file__).parent.parent.parent / ".env"
         if project_env_path.exists():
             # Security: Project .env files may contain secrets that could be committed
@@ -71,11 +71,11 @@ class ConfigManager:
                 # Log warning if project .env exists but is not explicitly allowed
                 pass  # Silently skip - project .env should not be used
         else:
-            # 不要加载 .env.example - 它仅作为配置模板参考，不包含有效配置
+            # Do not load .env.example - it is only a config template reference, not a valid config file
             pass  # Silently skip - .env.example is a template, not a config file
 
     def _load_model_configs(self) -> None:
-        """从 JSON 文件加载模型配置"""
+        """Load model configuration from JSON file"""
         config_file = self._config_path / "model_configs.json"
         if config_file.exists():
             with open(config_file, "r", encoding="utf-8") as f:
@@ -84,20 +84,20 @@ class ConfigManager:
             self._model_configs = {}
 
     def refresh(self) -> None:
-        """刷新配置 (重新加载文件和环境变量)"""
+        """Refresh configuration (reload file and environment variables)"""
         self._load_env()
         self._load_model_configs()
 
     def get(self, key: str, default: Any = None) -> Any:
         """
-        获取配置值
+        Get a configuration value
 
         Args:
-            key: 配置键名，支持点分隔符 (如 "qwen-max.api_key")
-            default: 默认值
+            key: Configuration key, supports dot notation (e.g. "qwen-max.api_key")
+            default: Default value
 
         Returns:
-            配置值或默认值
+            Configuration value or default
         """
         keys = key.split(".")
         value: Any = self._model_configs
@@ -112,27 +112,27 @@ class ConfigManager:
 
     def get_model_config(self, model_name: str) -> Dict[str, Any]:
         """
-        获取指定模型的完整配置
+        Get complete configuration for a specific model
 
         Args:
-            model_name: 模型名称 (如 "qwen-max")
+            model_name: Model name (e.g. "qwen-max")
 
         Returns:
-            模型配置字典
+            Model configuration dictionary
         """
         return self._model_configs.get(model_name, {})
 
     def get_api_key(self, model_name: str) -> Optional[str]:
         """
-        获取模型 API Key (优先从环境变量读取)
+        Get model API Key (prioritize reading from environment variables)
 
         Args:
-            model_name: 模型名称
+            model_name: Model name
 
         Returns:
-            API Key 或 None
+            API Key or None
         """
-        # 优先从环境变量读取
+        # Prioritize reading from environment variables
         env_key_map = {
             "qwen-max": "DASHSCOPE_API_KEY",
             "qwen-plus": "DASHSCOPE_API_KEY",
@@ -144,201 +144,201 @@ class ConfigManager:
         if api_key:
             return api_key
 
-        # 从配置文件读取
+        # Read from config file
         return self.get(f"{model_name}.api_key")
 
     @property
     def model_configs(self) -> Dict[str, Any]:
-        """获取所有模型配置"""
+        """Get all model configurations"""
         return self._model_configs.copy()
 
     @property
     def env_loaded(self) -> bool:
-        """检查环境变量是否已加载"""
+        """Check if environment variables have been loaded"""
         return self._env_loaded
 
     # ===========================================
-    # 阿里云百炼配置
+    # Alibaba Cloud Bailian configuration
     # ===========================================
     @property
     def dashscope_api_key(self) -> str:
-        """获取阿里云百炼 API Key"""
-        return os.getenv("DASHSCOPE_API_KEY", "")
+        """Get GIA-specific API Key (isolated from Claude Code's DASHSCOPE_API_KEY)"""
+        return os.getenv("GIA_DASHSCOPE_API_KEY", "")
 
     @property
     def dashscope_organization_id(self) -> str:
-        """获取阿里云百炼组织 ID"""
+        """Get Alibaba Cloud Bailian organization ID"""
         return os.getenv("DASHSCOPE_ORGANIZATION_ID", "")
 
     @property
     def dashscope_model_name(self) -> str:
-        """获取默认模型名称"""
+        """Get default model name"""
         return os.getenv("DASHSCOPE_MODEL_NAME", "qwen-max")
 
     @property
     def dashscope_base_url(self) -> str:
-        """获取阿里云百炼 API 端点 URL"""
+        """Get Alibaba Cloud Bailian API endpoint URL (shared with Claude Code)"""
         return os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com")
 
     # ===========================================
-    # GitHub API 配置
+    # GitHub API configuration
     # ===========================================
     @property
     def github_token(self) -> str:
-        """获取 GitHub Token"""
+        """Get GitHub Token"""
         return os.getenv("GITHUB_TOKEN", "")
 
     @property
     def github_api_url(self) -> str:
-        """获取 GitHub API URL"""
+        """Get GitHub API URL"""
         return os.getenv("GITHUB_API_URL", "https://api.github.com")
 
     @property
     def github_timeout(self) -> int:
-        """获取 GitHub API 请求超时时间"""
+        """Get GitHub API request timeout"""
         return int(os.getenv("GITHUB_TIMEOUT", "30"))
 
     @property
     def github_rate_limit(self) -> int:
-        """获取 GitHub API 请求速率限制"""
+        """Get GitHub API rate limit"""
         return int(os.getenv("GITHUB_RATE_LIMIT", "10"))
 
     # ===========================================
-    # 模型参数配置
+    # Model parameter configuration
     # ===========================================
     @property
     def model_temperature(self) -> float:
-        """获取模型温度参数"""
+        """Get model temperature parameter"""
         return float(os.getenv("MODEL_TEMPERATURE", "0.7"))
 
     @property
     def model_max_tokens(self) -> int:
-        """获取模型最大 token 数"""
+        """Get model maximum token count"""
         return int(os.getenv("MODEL_MAX_TOKENS", "2048"))
 
     @property
     def model_top_p(self) -> float:
-        """获取模型 Top-P 参数"""
+        """Get model Top-P parameter"""
         return float(os.getenv("MODEL_TOP_P", "0.9"))
 
     @property
     def model_repetition_penalty(self) -> float:
-        """获取模型重复惩罚系数"""
+        """Get model repetition penalty coefficient"""
         return float(os.getenv("MODEL_REPETITION_PENALTY", "1.1"))
 
     # ===========================================
-    # 日志配置
+    # Logging configuration
     # ===========================================
     @property
     def log_level(self) -> str:
-        """获取日志级别"""
+        """Get log level"""
         return os.getenv("LOG_LEVEL", "INFO")
 
     @property
     def log_max_size_mb(self) -> int:
-        """获取日志文件最大大小 (MB)"""
+        """Get maximum log file size (MB)"""
         return int(os.getenv("LOG_MAX_SIZE_MB", "10"))
 
     @property
     def log_retention_days(self) -> int:
-        """获取日志保留天数"""
+        """Get log retention days"""
         return int(os.getenv("LOG_RETENTION_DAYS", "7"))
 
     @property
     def log_dir(self) -> str:
-        """获取日志目录"""
+        """Get log directory"""
         return os.getenv("LOG_DIR", "logs")
 
     # ===========================================
-    # AgentScope 配置
+    # AgentScope configuration
     # ===========================================
     @property
     def agentscope_project(self) -> str:
-        """获取 AgentScope 项目名称"""
+        """Get AgentScope project name"""
         return os.getenv("AGENTSCOPE_PROJECT", "GitHub Insight Agent")
 
     @property
     def agentscope_run_name(self) -> str:
-        """获取 AgentScope 运行名称"""
+        """Get AgentScope run name"""
         return os.getenv("AGENTSCOPE_RUN_NAME", "main")
 
     @property
     def agentscope_enable_studio(self) -> bool:
-        """是否启用 AgentScope Studio"""
+        """Whether to enable AgentScope Studio"""
         return os.getenv("AGENTSCOPE_ENABLE_STUDIO", "false").lower() == "true"
 
     @property
     def agentscope_studio_url(self) -> str:
-        """获取 AgentScope Studio URL"""
+        """Get AgentScope Studio URL"""
         return os.getenv("AGENTSCOPE_STUDIO_URL", "http://localhost:3000")
 
     @property
     def agentscope_enable_tracing(self) -> bool:
-        """是否启用追踪"""
+        """Whether to enable tracing"""
         return os.getenv("AGENTSCOPE_ENABLE_TRACING", "false").lower() == "true"
 
     @property
     def agentscope_tracing_url(self) -> str:
-        """获取追踪服务 URL"""
+        """Get tracing service URL"""
         return os.getenv("AGENTSCOPE_TRACING_URL", "")
 
     # ===========================================
-    # 应用配置
+    # Application configuration
     # ===========================================
     @property
     def project_root(self) -> str:
-        """获取项目根目录"""
+        """Get project root directory"""
         return os.getenv("PROJECT_ROOT", str(Path(__file__).parent.parent.parent))
 
     @property
     def config_dir(self) -> str:
-        """获取配置目录"""
+        """Get configuration directory"""
         return os.getenv("CONFIG_DIR", "configs")
 
     @property
     def model_config_file(self) -> str:
-        """获取模型配置文件名"""
+        """Get model config file name"""
         return os.getenv("MODEL_CONFIG_FILE", "model_configs.json")
 
     @property
     def prompt_templates_dir(self) -> str:
-        """获取提示词模板目录"""
+        """Get prompt templates directory"""
         return os.getenv("PROMPT_TEMPLATES_DIR", "prompt_templates")
 
     @property
     def output_dir(self) -> str:
-        """获取输出目录"""
+        """Get output directory"""
         return os.getenv("OUTPUT_DIR", "output")
 
     @property
     def temp_dir(self) -> str:
-        """获取临时目录"""
+        """Get temporary directory"""
         return os.getenv("TEMP_DIR", "tmp")
 
     # ===========================================
-    # 高级配置
+    # Advanced configuration
     # ===========================================
     @property
     def max_retries(self) -> int:
-        """获取最大重试次数"""
+        """Get maximum retry count"""
         return int(os.getenv("MAX_RETRIES", "3"))
 
     @property
     def retry_delay_seconds(self) -> float:
-        """获取重试延迟时间 (秒)"""
+        """Get retry delay time (seconds)"""
         return float(os.getenv("RETRY_DELAY_SECONDS", "1"))
 
     @property
     def retry_backoff_multiplier(self) -> float:
-        """获取重试退避乘数"""
+        """Get retry backoff multiplier"""
         return float(os.getenv("RETRY_BACKOFF_MULTIPLIER", "2.0"))
 
     @property
     def request_timeout(self) -> int:
-        """获取请求超时时间 (秒)"""
+        """Get request timeout (seconds)"""
         return int(os.getenv("REQUEST_TIMEOUT", "60"))
 
     @property
     def debug_mode(self) -> bool:
-        """是否启用调试模式"""
+        """Whether to enable debug mode"""
         return os.getenv("DEBUG_MODE", "false").lower() == "true"

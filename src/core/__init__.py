@@ -1,5 +1,5 @@
 # Core engine module
-"""核心引擎模块：配置管理、日志封装、对话管理"""
+"""Core engine module: configuration management, logging wrapper, conversation management"""
 
 from .config_manager import ConfigManager
 from .logger import get_logger

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-GitHub Toolkit - AgentScope Toolkit 集成
+GitHub Toolkit - AgentScope Toolkit Integration
 
-功能:
-- 将 GitHubTool 方法注册为 AgentScope Toolkit 工具
-- 自动从 docstring 生成 JSON Schema
-- 支持 MCP (Model Context Protocol) 集成
-- 支持流式返回和统一调用接口
+Features:
+- Registers GitHubTool methods as AgentScope Toolkit tools
+- Auto-generates JSON Schema from docstrings
+- Supports MCP (Model Context Protocol) integration
+- Supports streaming return and unified invocation interface
 """
 
 from typing import Any, Dict, List, Optional
@@ -26,29 +26,29 @@ def create_github_toolkit(  # noqa: C901
     use_mcp: bool = True,
 ) -> Toolkit:
     """
-    创建并配置 GitHub Toolkit
+    Create and configure the GitHub Toolkit
 
     Args:
-        config: 配置管理器实例
-        github_token: GitHub Token（可选，优先从配置读取）
-        use_mcp: 是否启用 GitHub MCP Server（默认 True）
+        config: Config manager instance
+        github_token: GitHub Token (optional, read from config if not provided)
+        use_mcp: Whether to enable GitHub MCP Server (default True)
 
     Returns:
-        已注册 GitHub 工具的 Toolkit 实例
+        Toolkit instance with registered GitHub tools
     """
-    # 创建 Toolkit 并指定可用的工具组
+    # Create Toolkit and specify available tool groups
     toolkit = Toolkit()
 
-    # 创建 github 工具组（默认激活）
+    # Create github tool group (active by default)
     toolkit.create_tool_group("github", description="GitHub API tools for repository search and analysis", active=True)
 
-    # 创建 github_mcp 工具组（如果使用 MCP）
+    # Create github_mcp tool group (if using MCP)
     if use_mcp:
         toolkit.create_tool_group("github_mcp", description="GitHub MCP Server tools", active=True)
 
     github_tool = GitHubTool(config=config, token=github_token)
 
-    # 尝试注册 MCP 客户端
+    # Try to register MCP client
     mcp_tool_count = 0
     if use_mcp:
         try:
@@ -60,7 +60,7 @@ def create_github_toolkit(  # noqa: C901
             logger.warning(f"MCP Server connection failed, falling back to local tools: {e}")
             use_mcp = False
 
-    # 1. 注册搜索仓库工具
+    # 1. Register repository search tool
     def search_repositories(
         query: str,
         sort: str = "stars",
@@ -105,10 +105,10 @@ def create_github_toolkit(  # noqa: C901
     toolkit.register_tool_function(
         search_repositories,
         group_name="github",
-        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+        namesake_strategy="skip",  # Skip duplicates with MCP tools
     )
 
-    # 2. 注册获取 README 工具
+    # 2. Register README retrieval tool
     def get_readme(
         owner: str,
         repo: str,
@@ -139,10 +139,10 @@ def create_github_toolkit(  # noqa: C901
     toolkit.register_tool_function(
         get_readme,
         group_name="github",
-        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+        namesake_strategy="skip",  # Skip duplicates with MCP tools
     )
 
-    # 3. 注册获取仓库信息工具
+    # 3. Register repository info tool
     def get_repo_info(owner: str, repo: str) -> ToolResponse:
         """
         Get detailed information about a GitHub repository.
@@ -175,10 +175,10 @@ def create_github_toolkit(  # noqa: C901
     toolkit.register_tool_function(
         get_repo_info,
         group_name="github",
-        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+        namesake_strategy="skip",  # Skip duplicates with MCP tools
     )
 
-    # 4. 注册项目摘要工具
+    # 4. Register project summary tool
     def get_project_summary(
         owner: str,
         repo: str,
@@ -231,10 +231,10 @@ def create_github_toolkit(  # noqa: C901
     toolkit.register_tool_function(
         get_project_summary,
         group_name="github",
-        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+        namesake_strategy="skip",  # Skip duplicates with MCP tools
     )
 
-    # 5. 注册速率限制查询工具
+    # 5. Register rate limit query tool
     def check_rate_limit() -> ToolResponse:
         """
         Check the current GitHub API rate limit status.
@@ -262,7 +262,7 @@ def create_github_toolkit(  # noqa: C901
     toolkit.register_tool_function(
         check_rate_limit,
         group_name="github",
-        namesake_strategy="skip",  # 跳过与 MCP 工具重复的
+        namesake_strategy="skip",  # Skip duplicates with MCP tools
     )
 
     logger.info(f"GitHub Toolkit created with {len(toolkit.get_json_schemas())} tools registered (MCP: {mcp_tool_count})")
@@ -271,18 +271,18 @@ def create_github_toolkit(  # noqa: C901
 
 def get_github_tool_schemas(toolkit: Toolkit) -> List[Dict[str, Any]]:
     """
-    获取 GitHub 工具的 JSON Schema 列表
+    Get the list of JSON Schemas for GitHub tools
 
     Args:
-        toolkit: GitHub Toolkit 实例
+        toolkit: GitHub Toolkit instance
 
     Returns:
-        JSON Schema 列表，用于 LLM 工具调用
+        List of JSON Schemas for LLM tool invocation
     """
     return toolkit.get_json_schemas()
 
 
-# 便捷函数：获取预设的 GitHub Toolkit
+# Convenience function: get preset GitHub Toolkit
 _github_toolkit_cache: Optional[Toolkit] = None
 
 
@@ -293,16 +293,16 @@ def get_github_toolkit(
     use_mcp: bool = True,
 ) -> Toolkit:
     """
-    获取 GitHub Toolkit 实例（单例模式）
+    Get GitHub Toolkit instance (singleton pattern)
 
     Args:
-        config: 配置管理器实例
+        config: Config manager instance
         github_token: GitHub Token
-        force_new: 是否强制创建新实例
-        use_mcp: 是否启用 GitHub MCP Server
+        force_new: Whether to force creating a new instance
+        use_mcp: Whether to enable GitHub MCP Server
 
     Returns:
-        GitHub Toolkit 实例
+        GitHub Toolkit instance
     """
     global _github_toolkit_cache
 

@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-弹性 HTTP 客户端
+Resilient HTTP client
 
-提供:
-- 指数退避重试
-- 超时处理
-- 429 限流优雅降级
-- 熔断器模式
+Provides:
+- Exponential backoff retry
+- Timeout handling
+- Graceful degradation for 429 rate limiting
+- Circuit breaker pattern
 
-基于 tenacity 库实现可靠的重试逻辑。
+Reliable retry logic based on the tenacity library.
 """
 
 import asyncio
@@ -30,9 +30,9 @@ from src.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-# 自定义异常
+# Custom exceptions
 class RateLimitError(Exception):
-    """速率限制异常"""
+    """Rate limit exception"""
 
     def __init__(self, message: str, retry_after: Optional[int] = None):
         super().__init__(message)
@@ -40,33 +40,33 @@ class RateLimitError(Exception):
 
 
 class ServerError(requests.exceptions.RequestException):
-    """服务器错误 (5xx)，可重试"""
+    """Server error (5xx), retryable"""
 
     pass
 
 
 class CircuitBreakerError(Exception):
-    """熔断器异常"""
+    """Circuit breaker exception"""
 
     pass
 
 
 class ResilientHTTPClient:
     """
-    弹性 HTTP 客户端
+    Resilient HTTP client
 
-    提供:
-    - 指数退避重试
-    - 超时处理
-    - 429 限流处理
-    - 熔断器模式
+    Provides:
+    - Exponential backoff retry
+    - Timeout handling
+    - 429 rate limit handling
+    - Circuit breaker pattern
 
     Attributes:
-        timeout: 请求超时时间 (秒)
-        max_retries: 最大重试次数
-        max_wait: 最大等待时间 (秒)
-        circuit_breaker_threshold: 熔断器失败阈值
-        circuit_breaker_timeout: 熔断器超时时间 (秒)
+        timeout: Request timeout (seconds)
+        max_retries: Maximum retry count
+        max_wait: Maximum wait time (seconds)
+        circuit_breaker_threshold: Circuit breaker failure threshold
+        circuit_breaker_timeout: Circuit breaker timeout (seconds)
     """
 
     def __init__(
@@ -78,14 +78,14 @@ class ResilientHTTPClient:
         circuit_breaker_timeout: int = 60,
     ):
         """
-        初始化弹性 HTTP 客户端
+        Initialize resilient HTTP client
 
         Args:
-            timeout: 请求超时时间
-            max_retries: 最大重试次数
-            max_wait: 最大等待时间 (两次重试之间)
-            circuit_breaker_threshold: 熔断器失败阈值
-            circuit_breaker_timeout: 熔断器超时时间
+            timeout: Request timeout
+            max_retries: Maximum retry count
+            max_wait: Maximum wait time (between two retries)
+            circuit_breaker_threshold: Circuit breaker failure threshold
+            circuit_breaker_timeout: Circuit breaker timeout
         """
         self.timeout = timeout
         self.max_retries = max_retries
@@ -93,7 +93,7 @@ class ResilientHTTPClient:
         self.circuit_breaker_threshold = circuit_breaker_threshold
         self.circuit_breaker_timeout = circuit_breaker_timeout
 
-        # 熔断器状态
+        # Circuit breaker state
         self._failure_count = 0
         self._circuit_open = False
         self._circuit_open_time: Optional[float] = None
@@ -102,13 +102,13 @@ class ResilientHTTPClient:
         self._session = requests.Session()
 
     def _check_circuit_breaker(self) -> None:
-        """检查熔断器状态"""
+        """Check circuit breaker status"""
         if self._circuit_open:
             if self._circuit_open_time is None:
                 self._circuit_open = False
                 self._failure_count = 0
             elif time.time() - self._circuit_open_time > self.circuit_breaker_timeout:
-                # 熔断器超时，尝试恢复
+                # Circuit breaker timed out, attempt recovery
                 self._circuit_open = False
                 self._failure_count = 0
                 logger.info("Circuit breaker recovered")
@@ -118,12 +118,12 @@ class ResilientHTTPClient:
                 )
 
     def _record_success(self) -> None:
-        """记录成功"""
+        """Record success"""
         self._failure_count = 0
         self._circuit_open = False
 
     def _record_failure(self) -> None:
-        """记录失败"""
+        """Record failure"""
         self._failure_count += 1
         if self._failure_count >= self.circuit_breaker_threshold:
             self._circuit_open = True
@@ -133,13 +133,13 @@ class ResilientHTTPClient:
             )
 
     def _handle_rate_limit(self, response: requests.Response) -> None:
-        """处理 429 速率限制"""
+        """Handle 429 rate limit"""
         retry_after = response.headers.get("Retry-After")
         if retry_after:
             try:
                 retry_after_sec = int(retry_after)
             except ValueError:
-                retry_after_sec = 60  # 默认等待 60 秒
+                retry_after_sec = 60  # Default wait 60 seconds
         else:
             retry_after_sec = 60
 
@@ -165,24 +165,24 @@ class ResilientHTTPClient:
         **kwargs,
     ) -> requests.Response:
         """
-        发送 HTTP 请求（带重试逻辑）
+        Send HTTP request (with retry logic)
 
         Args:
-            method: HTTP 方法
-            url: 请求 URL
-            timeout: 超时时间（秒）
-            handle_rate_limit: 是否处理 429 限流
-            **kwargs: 传递给 requests 的其他参数
+            method: HTTP method
+            url: Request URL
+            timeout: Timeout (seconds)
+            handle_rate_limit: Whether to handle 429 rate limiting
+            **kwargs: Other parameters passed to requests
 
         Returns:
-            requests.Response 响应
+            requests.Response
 
         Raises:
-            CircuitBreakerError: 熔断器打开
-            RateLimitError: 速率限制
-            requests.exceptions.RequestException: 其他请求异常
+            CircuitBreakerError: Circuit breaker is open
+            RateLimitError: Rate limit exceeded
+            requests.exceptions.RequestException: Other request exceptions
         """
-        # 检查熔断器
+        # Check circuit breaker
         self._check_circuit_breaker()
 
         try:
@@ -193,14 +193,14 @@ class ResilientHTTPClient:
                 **kwargs,
             )
 
-            # 处理 429 速率限制
+            # Handle 429 rate limit
             if response.status_code == 429 and handle_rate_limit:
                 self._handle_rate_limit(response)
 
-            # 处理其他错误状态码
+            # Handle other error status codes
             if response.status_code >= 400:
                 if response.status_code >= 500:
-                    # 服务器错误，可重试
+                    # Server error, retryable
                     raise ServerError(
                         f"Server error: {response.status_code}"
                     )
@@ -217,12 +217,12 @@ class ResilientHTTPClient:
                         f"Not Found: {url}"
                     )
 
-            # 记录成功
+            # Record success
             self._record_success()
             return response
 
         except RetryError:
-            # 所有重试失败
+            # All retries failed
             self._record_failure()
             logger.error(f"Request failed after all retries: {url}")
             raise
@@ -240,19 +240,19 @@ class ResilientHTTPClient:
             raise
 
     def get(self, url: str, **kwargs) -> requests.Response:
-        """发送 GET 请求"""
+        """Send GET request"""
         return self.request("GET", url, **kwargs)
 
     def post(self, url: str, **kwargs) -> requests.Response:
-        """发送 POST 请求"""
+        """Send POST request"""
         return self.request("POST", url, **kwargs)
 
     def put(self, url: str, **kwargs) -> requests.Response:
-        """发送 PUT 请求"""
+        """Send PUT request"""
         return self.request("PUT", url, **kwargs)
 
     def delete(self, url: str, **kwargs) -> requests.Response:
-        """发送 DELETE 请求"""
+        """Send DELETE request"""
         return self.request("DELETE", url, **kwargs)
 
     async def request_async(
@@ -263,16 +263,16 @@ class ResilientHTTPClient:
         **kwargs,
     ) -> requests.Response:
         """
-        异步发送 HTTP 请求
+        Send HTTP request asynchronously
 
         Args:
-            method: HTTP 方法
-            url: 请求 URL
-            timeout: 超时时间
-            **kwargs: 其他参数
+            method: HTTP method
+            url: Request URL
+            timeout: Timeout
+            **kwargs: Other parameters
 
         Returns:
-            requests.Response 响应
+            requests.Response
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
@@ -281,7 +281,7 @@ class ResilientHTTPClient:
         )
 
     def close(self) -> None:
-        """关闭客户端"""
+        """Close client"""
         self._session.close()
 
     def __enter__(self):
@@ -291,7 +291,7 @@ class ResilientHTTPClient:
         self.close()
 
 
-# 便捷函数：创建带装饰器的重试函数
+# Convenience function: create retry-decorated function
 def with_retry(
     max_retries: int = 5,
     multiplier: float = 1,
@@ -299,9 +299,9 @@ def with_retry(
     max_wait: float = 60,
 ):
     """
-    重试装饰器
+    Retry decorator
 
-    使用示例:
+    Usage example:
         @with_retry(max_retries=3)
         def my_function():
             pass

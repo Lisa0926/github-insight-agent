@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LLM Provider 模块初始化
+LLM Provider module initialization
 """
 
 from src.llm.providers.base import LLMProvider
