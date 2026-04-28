@@ -26,6 +26,10 @@
 - *(fix)* Update test assertions for English-translated compressed summary header
 - *(test)* Fix agent integration test to avoid async reply() method (AgentScope hooks)
 
+### Removed
+
+- *(cli)* Remove start_cli.sh (redundant with run_cli.py and gia entry point)
+
 ### Chore
 
 - Add .env.sample as config template and remove from .gitignore
