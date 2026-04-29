@@ -371,8 +371,6 @@ def get_persistent_memory(
     Returns:
         PersistentMemory instance
     """
-    global _persistent_memory_cache
-
     cache_key = db_path
 
     if force_new or cache_key not in _persistent_memory_cache:
