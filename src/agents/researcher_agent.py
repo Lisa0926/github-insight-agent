@@ -4,13 +4,14 @@ Researcher Agent
 
 Features:
 - Professional open-source intelligence researcher
-- Uses GitHub tools to search for projects and extract key information
-- Returns structured data or concise summaries
+- Uses LLM intent understanding to select tools and generate parameters
+- Supports arbitrary natural language input without predefined patterns
 - Uses AgentScope ModelWrapper for model calls
 - Uses AgentScope Msg class for unified message format
 - Inherits from AgentScope AgentBase
 """
 
+import json
 from typing import Any, Dict, List, Optional, Union
 import re
 from datetime import datetime, timedelta
@@ -51,13 +52,194 @@ def set_studio_config(studio_url: str, run_id: str) -> None:
     logger.debug(f"Studio config set for run: {run_id}")
 
 
+# Tool definitions for LLM intent understanding
+INTENT_TOOLS = [
+    {
+        "name": "search_repositories",
+        "description": (
+            "搜索GitHub仓库。当用户想找某类项目、框架、工具时使用。"
+            "支持按stars/forks/更新时间排序。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "搜索关键词（必须是英文技术术语或项目名，"
+                        "如'AI agent framework', 'React', 'FastAPI'）"
+                    )
+                },
+                "sort": {
+                    "type": "string",
+                    "enum": ["stars", "forks", "updated"],
+                    "description": "排序方式"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回数量"
+                },
+                "time_range_days": {
+                    "type": "integer",
+                    "description": (
+                        "只搜索最近N天内创建的项目。"
+                        "0或不填表示不限时间。"
+                    )
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "get_repo_info",
+        "description": (
+            "获取单个GitHub仓库的详细信息（stars、语言、描述等）。"
+            "当用户问某个具体项目的信息时使用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "owner": {
+                    "type": "string",
+                    "description": "仓库所有者（用户名或组织名）"
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "仓库名"
+                }
+            },
+            "required": ["owner", "repo"]
+        }
+    },
+    {
+        "name": "analyze_project",
+        "description": (
+            "深度分析一个GitHub项目（技术栈、核心功能、推荐度等）。"
+            "当用户说'分析'某个项目时使用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "owner": {
+                    "type": "string",
+                    "description": "仓库所有者"
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "仓库名"
+                }
+            },
+            "required": ["owner", "repo"]
+        }
+    },
+    {
+        "name": "compare_repositories",
+        "description": (
+            "比较两个或多个GitHub项目。"
+            "当用户说'比较'、'对比'项目时使用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repositories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "要比较的仓库列表，每项格式为 'owner/repo'"
+                    )
+                }
+            },
+            "required": ["repositories"]
+        }
+    },
+    {
+        "name": "chat",
+        "description": (
+            "纯对话。当用户只是在聊天、提问、不需要查询GitHub时使用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "用户的原始问题或消息"
+                }
+            },
+            "required": ["message"]
+        }
+    }
+]
+
+INTENT_SYSTEM_PROMPT = """你是一个AI助手，负责理解用户的意图并选择合适的工具。
+
+## 可用工具
+
+1. **search_repositories** - 搜索GitHub仓库
+   - 当用户想找"最火的"、"最热门的"、"推荐"某类项目时使用
+   - 将中文技术话题转化为英文搜索关键词
+
+2. **get_repo_info** - 获取单个仓库信息
+   - 当用户问某个具体项目的stars、语言、描述等时使用
+
+3. **analyze_project** - 深度分析项目
+   - 当用户说"分析"某个项目时使用
+
+4. **compare_repositories** - 比较多个项目
+   - 当用户说"比较"、"对比"项目时使用
+
+5. **chat** - 纯对话
+   - 当用户只是在聊天或提问、不需要查GitHub时使用
+
+## 输出格式
+
+你必须只输出一个JSON对象，不要输出任何其他内容。格式如下：
+```json
+{"action": "工具名", "params": {参数对象}}
+```
+
+## 示例
+
+用户："搜索并翻译，单个项目的star数最高的排名前3的项目"
+-> 用户想找热门AI项目
+```json
+{"action": "search_repositories", "params": {"query": "AI agent framework", "sort": "stars", "limit": 3}}
+```
+
+用户："langchain的star数是多少"
+```json
+{"action": "get_repo_info", "params": {"owner": "langchain-ai", "repo": "langchain"}}
+```
+
+用户："帮我搜索最近一周最火的Rust项目"
+```json
+{"action": "search_repositories", "params": {"query": "Rust", "sort": "stars", "limit": 10, "time_range_days": 7}}
+```
+
+用户："比较langchain和autogen"
+```json
+{"action": "compare_repositories", "params": {"repositories": ["langchain-ai/langchain", "microsoft/autogen"]}}
+```
+
+用户："你好"
+```json
+{"action": "chat", "params": {"message": "你好"}}
+```
+
+## 注意
+- 搜索关键词必须是英文技术术语
+- 如果用户没有指定数量，搜索默认返回5个
+- 如果用户没有指定排序，默认按stars排序
+- 输出必须是可以被json.loads解析的有效JSON
+"""
+
+
 class ResearcherAgent(GiaAgentBase):
     """
     Researcher Agent
 
     Role: Professional open-source intelligence researcher
-    Task: Search for projects using GitHub tools based on user queries,
-          and extract key information
+    Task: Understand user intent via LLM, select appropriate tool,
+          execute it, and return structured results.
     """
 
     SYSTEM_PROMPT = """你是一个专业的开源情报研究员 (Open Source Intelligence Researcher)。
@@ -66,11 +248,6 @@ class ResearcherAgent(GiaAgentBase):
 1. 根据用户的查询，使用 GitHub 工具搜索相关项目
 2. 提取关键信息：项目名称、Star 数量、主要编程语言、简介
 3. 返回结构化数据或简洁的总结
-
-## 可用工具
-- search_repositories(query, sort, order, per_page): 搜索 GitHub 仓库
-- get_readme(owner, repo, ref): 获取仓库 README 内容
-- get_repo_info(owner, repo): 获取仓库详细信息
 
 ## 约束
 1. 只返回结构化数据或简洁的总结，不要编造数据
@@ -111,73 +288,217 @@ class ResearcherAgent(GiaAgentBase):
 
         logger.info(f"ResearcherAgent '{name}' initialized with model '{model_name}'")
 
-    def _parse_time_range(self, user_query: str) -> Optional[int]:
+    def _understand_intent(self, user_query: str) -> Dict[str, Any]:
         """
-        Extract time range (in days) from user query
+        Use LLM to understand user intent and select the appropriate tool.
 
-        Supported natural language formats:
-        - Last N days / Past N days / Recent N days
-        - Today/Yesterday/This week/This month
-        - Within N days (e.g., within three days, within five days)
+        This is the core method that replaces all regex-based parsing.
+        The LLM understands the natural language query and outputs a
+        structured action + parameters.
+
+        Returns:
+            Dict with 'action' and 'params' keys.
+            Falls back to {"action": "chat", "params": {"message": user_query}}
+            on failure.
         """
-        # Dynamic matching: 最近 N 天 / 近 N 天 / 过去 N 天
-        days_match = re.search(r"(?:最近|近|过去)\s*(\d+)\s*天", user_query)
-        if days_match:
-            return int(days_match.group(1))
+        try:
+            model_wrapper = self._get_model_wrapper()
+            messages = [
+                {"name": "system", "content": INTENT_SYSTEM_PROMPT, "role": "system"},
+                {"name": "user", "content": user_query, "role": "user"},
+            ]
+            response = model_wrapper(
+                messages=messages,
+                max_tokens=512,
+                temperature=0.1,  # Low temperature for consistent output
+            )
+            content = self._extract_response_text(response).strip()
 
-        # "Within N days" format (三天内、五天内, etc.) - Chinese numeral mapping
-        chinese_nums = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-        for cn, val in chinese_nums.items():
-            if f"{cn}天内" in user_query:
-                return val
+            # Extract JSON from response
+            # Try to find JSON block (```json ... ``` or just {...})
+            json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
+            if json_match:
+                content = json_match.group(1)
+            else:
+                json_match = re.search(r"\{[\s\S]*\}", content)
+                if json_match:
+                    content = json_match.group(0)
 
-        # Fixed matching
-        if any(kw in user_query for kw in ["今天", "今日"]):
-            return 0
-        if "昨天" in user_query:
-            return 1
-        if any(kw in user_query for kw in ["本周", "最近一周"]):
-            return 7
-        if any(kw in user_query for kw in ["本月", "最近一月"]):
-            return 30
+            intent = json.loads(content)
+            action = intent.get("action", "chat")
+            params = intent.get("params", {})
 
-        return None
+            logger.info(f"Intent understood: action='{action}', params={params}")
+            return {"action": action, "params": params}
 
-    def _build_search_params(self, user_query: str) -> dict:
-        """
-        Build GitHub Search API parameters
+        except Exception as e:
+            logger.warning(f"Intent understanding failed: {e}")
+            return {
+                "action": "chat",
+                "params": {"message": user_query},
+            }
 
-        Uses simple rule-based parsing:
-        1. Detect time range, add created condition
-        2. Extract number of projects (e.g., "top 3")
-        3. Detect sorting preference (most forked -> sort=forks)
-        """
-        # Default parameters
-        params = {
-            "search_query": user_query,
-            "sort": "stars",
-            "per_page": 10,
-        }
+    def _execute_search(self, params: Dict[str, Any]) -> str:
+        """Execute a search_repositories action"""
+        query = params.get("query", "")
+        sort = params.get("sort", "stars")
+        limit = params.get("limit", 5)
+        time_range_days = params.get("time_range_days", 0)
 
-        # 1. Parse time range
-        days = self._parse_time_range(user_query)
-        if days is not None:
-            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        # Build GitHub search query
+        search_query = query
+        if time_range_days and time_range_days > 0:
+            start_date = (
+                datetime.now() - timedelta(days=time_range_days)
+            ).strftime("%Y-%m-%d")
             end_date = datetime.now().strftime("%Y-%m-%d")
-            params["search_query"] = f"created:{start_date}..{end_date}"
+            search_query = f"created:{start_date}..{end_date} {query}"
 
-        # 2. Extract number of projects
-        count_match = re.search(r"前?\s*(\d+)\s*个", user_query)
-        if count_match:
-            params["per_page"] = min(int(count_match.group(1)), 20)
+        logger.info(f"Searching: '{search_query}' sort={sort} limit={limit}")
 
-        # 3. Detect sorting preference
-        if "fork" in user_query:
-            params["sort"] = "forks"
-        elif "updated" in user_query or "最新" in user_query:
-            params["sort"] = "updated"
+        try:
+            repos = self.github_tool.search_repositories(
+                query=search_query,
+                sort=sort,
+                order="desc",
+                per_page=min(limit, 100),
+            )
 
-        return params
+            if not repos:
+                return f"没有找到与「{query}」相关的仓库。"
+
+            # Build result markdown
+            lines = [
+                f"## 搜索结果：{query}",
+                "",
+                f"找到 **{len(repos)}** 个相关仓库：",
+                "",
+                "| # | 仓库 | Stars | 语言 | 简介 |",
+                "|---|------|-------|------|------|",
+            ]
+
+            for i, repo in enumerate(repos[:limit], 1):
+                desc = repo.description or "*无描述*"
+                if len(desc) > 60:
+                    desc = desc[:57] + "..."
+                lines.append(
+                    f"| {i} | **[{repo.full_name}]({repo.html_url})** "
+                    f"| {repo.stargazers_count:,} | "
+                    f"{repo.language or 'N/A'} | {desc} |"
+                )
+
+            return "\n".join(lines)
+
+        except RuntimeError as e:
+            logger.error(f"Search failed: {e}")
+            return f"搜索失败：{e}"
+
+    def _execute_get_repo_info(self, params: Dict[str, Any]) -> str:
+        """Execute a get_repo_info action, with fuzzy matching fallback."""
+        owner = params.get("owner", "")
+        repo = params.get("repo", "")
+
+        # Try exact match first
+        exact_error = None
+        try:
+            repo_info = self.github_tool.get_repo_info(owner, repo)
+            return (
+                f"**{repo_info.full_name}**\n"
+                f"- Stars: {repo_info.stargazers_count:,}\n"
+                f"- Forks: {repo_info.forks_count:,}\n"
+                f"- 语言: {repo_info.language or 'N/A'}\n"
+                f"- 描述: {repo_info.description or 'N/A'}\n"
+                f"- 最后更新: {repo_info.updated_at}\n"
+                f"- 地址: {repo_info.html_url}"
+            )
+        except Exception as e:
+            exact_error = str(e)
+            logger.info(f"Exact lookup failed for {owner}/{repo}: {e}, "
+                        "falling back to search")
+
+        # Fuzzy fallback: search for the repo name
+        search_keyword = f"{owner} {repo}".strip()
+        if not search_keyword:
+            return "请提供仓库名。"
+
+        try:
+            repos = self.github_tool.search_repositories(
+                query=search_keyword,
+                sort="stars",
+                order="desc",
+                per_page=5,
+            )
+
+            if not repos:
+                return (
+                    f"未找到与「{search_keyword}」相关的仓库。"
+                )
+
+            lines = [
+                f"未找到精确匹配「{owner}/{repo}」的项目，以下是相关项目：\n"
+            ]
+            for i, repo_info in enumerate(repos[:5], 1):
+                desc = repo_info.description or "*无描述*"
+                if len(desc) > 60:
+                    desc = desc[:57] + "..."
+                lines.append(
+                    f"{i}. **[{repo_info.full_name}]({repo_info.html_url})**\n"
+                    f"   Stars: {repo_info.stargazers_count:,} | "
+                    f"语言: {repo_info.language or 'N/A'}\n"
+                    f"   {desc}"
+                )
+            lines.append("\n请回复序号选择你要查询的项目，或说「分析」+ 项目名进行深度分析。")
+            return "\n".join(lines)
+
+        except Exception as e2:
+            logger.error(f"Fuzzy search also failed: {e2}")
+            return f"获取仓库信息失败：{exact_error}"
+
+    def _execute_analyze_project(
+        self, params: Dict[str, Any], analyst=None
+    ) -> str:
+        """Execute an analyze_project action, with fuzzy matching fallback."""
+        owner = params.get("owner", "")
+        repo = params.get("repo", "")
+
+        # Try exact match first
+        if analyst:
+            result = analyst.analyze_project(owner=owner, repo=repo)
+            if not result.get("error"):
+                analysis = result.get("analysis", {})
+                return (
+                    f"## 项目分析：{result.get('project', f'{owner}/{repo}')}\n\n"
+                    f"- Stars: {result.get('stars', 'N/A')}\n"
+                    f"- 语言: {result.get('language', 'N/A')}\n"
+                    f"- 核心功能: {analysis.get('core_function', 'N/A')}\n"
+                    f"- 技术栈: {analysis.get('tech_stack', {}).get('language', 'N/A')}\n"
+                    f"- 推荐意见: {analysis.get('recommendation', 'N/A')}"
+                )
+
+        # Fallback to get_repo_info (which has its own fuzzy search)
+        logger.info(f"Exact analysis failed for {owner}/{repo}, "
+                    "falling back to fuzzy search")
+        return self._execute_get_repo_info(params)
+
+    def _execute_compare(
+        self, params: Dict[str, Any], analyst=None
+    ) -> str:
+        """Execute a compare_repositories action"""
+        repos = params.get("repositories", [])
+        if not repos:
+            return "请提供要比较的仓库列表。"
+
+        lines = ["## 项目对比\n"]
+        for repo_str in repos:
+            parts = repo_str.split("/")
+            if len(parts) == 2:
+                owner, repo = parts
+                info = self._execute_get_repo_info({"owner": owner, "repo": repo})
+                lines.append(f"### {repo_str}")
+                lines.append(info)
+                lines.append("")
+
+        return "\n".join(lines)
 
     @trace(name="researcher.search_and_analyze")
     def search_and_analyze(
@@ -188,36 +509,54 @@ class ResearcherAgent(GiaAgentBase):
         per_page: int = None,
     ) -> Dict[str, Any]:
         """
-        Search and analyze GitHub repositories
+        Search and analyze GitHub repositories.
 
-        Args:
-            query: Search keyword (natural language or GitHub Search syntax)
-            sort: Sort field (optional, auto-parsed if not provided)
-            order: Sort order
-            per_page: Number of results (optional, auto-parsed if not provided)
+        Uses LLM intent understanding to parse the query.
+        If sort/per_page are specified externally, they override LLM output.
 
         Returns:
             Dictionary of search results
         """
-        # Build search parameters (auto-parse natural language)
-        params = self._build_search_params(query)
+        # Use LLM to understand intent
+        intent = self._understand_intent(query)
+        action = intent["action"]
+        params = intent["params"]
 
-        # If sort/per_page are specified externally, use those preferentially
+        # If external sort/per_page specified, use those
         if sort:
             params["sort"] = sort
         if per_page:
-            params["per_page"] = per_page
+            params["limit"] = per_page
 
-        search_query = params["search_query"]
-        logger.info(f"Original query: {query}")
-        logger.info(f"Search query: {search_query}, sort={params['sort']}, per_page={params['per_page']}")
+        # Only handle search actions via this method
+        if action != "search_repositories":
+            # If the intent is not a search, use the default search behavior
+            # with the raw query as fallback
+            logger.warning(
+                f"Intent action is '{action}', expected 'search_repositories'. "
+                "Using raw query for search."
+            )
+            params["query"] = query
+            params.setdefault("sort", "stars")
+            params.setdefault("limit", per_page or 5)
+
+        search_query = params.get("query", query)
+        sort_field = params.get("sort", "stars")
+        limit = params.get("limit", 5)
+
+        logger.info(
+            f"Original query: {query}"
+        )
+        logger.info(
+            f"Search query: {search_query}, sort={sort_field}, per_page={limit}"
+        )
 
         try:
             repos = self.github_tool.search_repositories(
                 query=search_query,
-                sort=params["sort"],
-                order=order,
-                per_page=params["per_page"],
+                sort=sort_field,
+                order="desc",
+                per_page=min(limit, 100),
             )
 
             result = {
@@ -293,15 +632,39 @@ class ResearcherAgent(GiaAgentBase):
         self._add_to_memory("assistant", response_content)
         return response
 
-    def reply_to_message(self, user_query: str) -> str:
-        """Respond to user query"""
+    def reply_to_message(self, user_query: str, analyst=None) -> str:
+        """
+        Respond to user query using LLM intent understanding.
+
+        This is the main entry point. The LLM understands the natural
+        language query, selects the right tool, and generates parameters.
+
+        Args:
+            user_query: User's natural language query
+            analyst: Optional AnalystAgent for analyze_project action
+        """
         logger.info(f"Received query: {user_query}")
 
-        query_lower = user_query.lower()
-        if any(kw in query_lower for kw in ["搜索", "search", "find", "github", "项目", "仓库"]):
-            search_result = self.search_and_analyze(query=user_query)
-            return self.generate_summary(search_result)
+        # Step 1: Use LLM to understand intent
+        intent = self._understand_intent(user_query)
+        action = intent["action"]
+        params = intent["params"]
+
+        logger.info(f"Executing action: {action}")
+
+        # Step 2: Route to appropriate handler
+        if action == "search_repositories":
+            return self._execute_search(params)
+        elif action == "get_repo_info":
+            return self._execute_get_repo_info(params)
+        elif action == "analyze_project":
+            return self._execute_analyze_project(params, analyst=analyst)
+        elif action == "compare_repositories":
+            return self._execute_compare(params, analyst=analyst)
+        elif action == "chat":
+            return self._call_llm(user_query)
         else:
+            logger.warning(f"Unknown action: {action}")
             return self._call_llm(user_query)
 
     def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
@@ -336,6 +699,7 @@ class ResearcherAgent(GiaAgentBase):
             "toolkit_enabled": self.toolkit is not None,
             "mcp_enabled": self.use_mcp,
             "persistent_enabled": self.use_persistent,
+            "intent_understanding": "LLM function calling",
         }
         if self.toolkit:
             schemas = self.toolkit.get_json_schemas()
@@ -353,4 +717,6 @@ class ResearcherAgent(GiaAgentBase):
 
     def get_description(self) -> str:
         """Get ResearcherAgent description"""
-        return "专业的开源情报研究员，擅长使用 GitHub 工具搜索项目并提取关键信息。"
+        return (
+            "专业的开源情报研究员，通过LLM意图理解选择工具并执行GitHub查询。"
+        )

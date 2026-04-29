@@ -744,6 +744,10 @@ No matching projects found. Please try:
         """
         Call LLM to answer follow-up questions
 
+        Uses intent understanding: if the query requires a GitHub tool call,
+        the researcher's LLM intent router handles it. Otherwise, falls back
+        to plain LLM chat with context.
+
         Args:
             user_query: User question
             context: Context information
@@ -751,6 +755,36 @@ No matching projects found. Please try:
         Returns:
             Assistant answer
         """
+        try:
+            # Try intent understanding first
+            intent = self.researcher._understand_intent(user_query)
+            action = intent["action"]
+            params = intent["params"]
+
+            # If it's a tool action, execute it
+            result = ""
+            if action == "get_repo_info":
+                result = self.researcher._execute_get_repo_info(params)
+            elif action == "search_repositories":
+                result = self.researcher._execute_search(params)
+            elif action == "compare_repositories":
+                result = self.researcher._execute_compare(
+                    params, analyst=self.analyst
+                )
+            elif action == "analyze_project":
+                result = self.researcher._execute_analyze_project(
+                    params, analyst=self.analyst
+                )
+            else:
+                result = None  # Signal to fall through to LLM chat
+
+            if result is not None:
+                return result
+            # For chat action, fall through to LLM with context
+        except Exception as e:
+            logger.warning(f"Intent routing failed: {e}, falling back to LLM chat")
+
+        # Fall back to LLM chat with context
         try:
             model_wrapper = self.analyst._get_model_wrapper()
 

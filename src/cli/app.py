@@ -19,8 +19,43 @@ sys.path.insert(0, str(project_root))
 from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
+import agentscope
 from src.core.config_manager import ConfigManager  # noqa: E402
 from src.workflows.agent_pipeline import AgentPipeline  # noqa: E402
+
+
+def _setup_studio(config: ConfigManager) -> None:
+    """Initialize AgentScope Studio connection."""
+    studio_url = config.agentscope_studio_url
+    run_name = config.agentscope_run_name
+
+    # Call agentscope.init() to register official Studio hooks and tracing
+    try:
+        agentscope.init(
+            project="GitHub Insight Agent",
+            name=run_name,
+            run_id=run_name,
+            studio_url=studio_url,
+        )
+    except Exception as e:
+        print(f"[Studio] Failed to init: {e}")
+
+    # Set custom studio config for agents
+    from src.agents.researcher_agent import set_studio_config as set_researcher_studio
+    from src.agents.analyst_agent import set_studio_config as set_analyst_studio
+
+    set_researcher_studio(studio_url, run_name)
+    set_analyst_studio(studio_url, run_name)
+    print(f"[Studio] Enabled (run_id: {run_name})")
+
+
+def _push_to_studio(sender: str, content: str, role: str = "assistant") -> None:
+    """Push a message to Studio (uses AgentScope official hook)."""
+    try:
+        from src.core.studio_integration import push_to_studio
+        push_to_studio(sender, content[:8000], role)
+    except Exception:
+        pass  # Graceful degradation - does not affect main flow
 
 
 def print_welcome():
@@ -105,17 +140,15 @@ def check_environment():
 
 def run_interactive_mode():  # noqa: C901
     """Run interactive mode"""
-    from src.agents.researcher_agent import set_studio_config as set_researcher_studio
-    from src.agents.analyst_agent import set_studio_config as set_analyst_studio
-
     config = ConfigManager()
     nl_parser = NaturalLanguageParser()
 
-    # Set up Studio configuration
+    # Set up Studio connection (registers hooks + custom forwarding)
     if config.agentscope_enable_studio:
-        set_researcher_studio(config.agentscope_studio_url, config.agentscope_run_name)
-        set_analyst_studio(config.agentscope_studio_url, config.agentscope_run_name)
-        renderer.print_info(f"Studio 已启用 (run_id: {config.agentscope_run_name})")
+        _setup_studio(config)
+        studio_enabled = True
+    else:
+        studio_enabled = False
 
     # Initialize report generator
     report_gen = AgentPipeline()
@@ -261,6 +294,9 @@ def run_interactive_mode():  # noqa: C901
                     with renderer.create_progress("Agent 思考中..."):
                         response = report_gen.handle_followup(user_input)
                     renderer.print_panel("🤖 Agent", response, style="cyan")
+                    if studio_enabled:
+                        _push_to_studio("user", user_input, "user")
+                        _push_to_studio("Agent", response, "assistant")
 
                 elif parsed.intent == IntentType.ANALYZE:
                     # Analyze a single project
@@ -271,16 +307,20 @@ def run_interactive_mode():  # noqa: C901
                             result = report_gen.analyst.analyze_project(owner, repo)
 
                         if result.get("error"):
+                            resp = f"分析失败：{result['error']}"
                             renderer.print_error("分析失败", result["error"])
                         else:
                             analysis = result.get("analysis", {})
-                            renderer.print_panel(
-                                "📊 分析结果",
+                            resp = (
+                                f"## 分析结果：{owner}/{repo}\n\n"
                                 f"核心功能：{analysis.get('core_function', 'N/A')}\n"
                                 f"技术栈：{analysis.get('tech_stack', {}).get('language', 'N/A')}\n"
-                                f"推荐意见：{analysis.get('recommendation', 'N/A')}",
-                                style="green"
+                                f"推荐意见：{analysis.get('recommendation', 'N/A')}"
                             )
+                            renderer.print_panel("📊 分析结果", resp, style="green")
+                        if studio_enabled:
+                            _push_to_studio("user", f"分析项目：{owner}/{repo}", "user")
+                            _push_to_studio("Analyst", resp, "assistant")
                     else:
                         renderer.print_warning("无法识别项目名，请使用 owner/repo 格式")
 
@@ -296,6 +336,7 @@ def run_interactive_mode():  # noqa: C901
                         )
 
                     repos = search_result.get("repositories", [])
+                    # Build content for CLI display
                     if repos:
                         renderer.print_info(f"找到 {len(repos)} 个项目")
                         rows = []
@@ -307,8 +348,17 @@ def run_interactive_mode():  # noqa: C901
                                 repo.get("language", ""),
                             ])
                         renderer.print_table("搜索结果", ["#", "项目", "Stars", "语言"], rows)
+                        # Build forwarded content (matching CLI table)
+                        table_lines = [f"## 搜索结果：{query}{time_desc}", ""]
+                        for row in rows:
+                            table_lines.append(f"{row[0]}. **{row[1]}** ⭐ {row[2]} {row[3]}")
+                        forwarded_content = "\n".join(table_lines)
                     else:
                         renderer.print_warning("未找到相关项目")
+                        forwarded_content = f"搜索「{query}」未找到相关项目"
+                    if studio_enabled:
+                        _push_to_studio("user", f"搜索：{query}{time_desc}", "user")
+                        _push_to_studio("Researcher", forwarded_content, "assistant")
 
                 elif parsed.intent == IntentType.REPORT:
                     # Generate detailed report
@@ -326,8 +376,14 @@ def run_interactive_mode():  # noqa: C901
                     if len(report) > display_limit:
                         renderer.print_panel("📄 报告", report[:display_limit])
                         renderer.print_warning(f"报告已截断（{len(report)} 字符，显示前 {display_limit} 字符）")
+                        if studio_enabled:
+                            _push_to_studio("user", f"生成报告：{query}{time_desc}", "user")
+                            _push_to_studio("Report", report[:8000], "assistant")
                     else:
                         renderer.print_panel("📄 报告", report)
+                        if studio_enabled:
+                            _push_to_studio("user", f"生成报告：{query}{time_desc}", "user")
+                            _push_to_studio("Report", report[:8000], "assistant")
 
                 else:
                     # Unknown intent, try to handle as search
@@ -342,8 +398,17 @@ def run_interactive_mode():  # noqa: C901
                     if repos:
                         renderer.print_info(f"找到 {len(repos)} 个项目")
                         renderer.print_panel("💡 提示", "使用 '分析第一个' 或 '对比前 3 个' 继续交互")
+                        # Build forwarded content
+                        repo_lines = [f"## 搜索结果\n"]
+                        for r in repos[:5]:
+                            repo_lines.append(f"- **{r['full_name']}** ⭐ {r['stars']:,} {r.get('language', '')}")
+                        forwarded_content = "\n".join(repo_lines)
                     else:
                         renderer.print_warning("未找到相关项目，请尝试其他关键词")
+                        forwarded_content = f"搜索「{user_input}」未找到相关项目"
+                    if studio_enabled:
+                        _push_to_studio("user", user_input, "user")
+                        _push_to_studio("Researcher", forwarded_content, "assistant")
 
         except KeyboardInterrupt:
             print("\n")
@@ -355,16 +420,24 @@ def run_interactive_mode():  # noqa: C901
 
 def main():
     """Main entry point"""
-    # Welcome message
-    print_welcome()
+    try:
+        # Welcome message
+        print_welcome()
 
-    # Environment check
-    check_environment()
+        # Environment check
+        check_environment()
 
-    # Interactive mode
-    print("\n")
-    renderer.print_panel("开始使用", "输入命令或直接输入问题开始分析", style="green")
-    run_interactive_mode()
+        # Interactive mode
+        print("\n")
+        renderer.print_panel("开始使用", "输入命令或直接输入问题开始分析", style="green")
+        run_interactive_mode()
+    finally:
+        # Flush traces to ensure they reach Studio
+        try:
+            from src.core.studio_integration import flush_traces
+            flush_traces()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

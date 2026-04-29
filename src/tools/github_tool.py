@@ -354,6 +354,9 @@ class GitHubTool:
         Returns:
             Cleaned plain text
         """
+        if not content:
+            return ""
+
         # Truncate if content is too long
         if len(content) > max_length:
             content = content[:max_length]

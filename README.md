@@ -13,8 +13,10 @@
 ## 功能特性
 
 - 多智能体协作：研究员 Agent + 分析师 Agent
+- LLM 意图理解：支持自然语言交互，自动识别搜索/分析/对比/对话意图
 - GitHub 仓库数据自动采集
 - 代码质量分析和趋势报告生成
+- AgentScope Studio 可视化：实时消息推送、OpenTelemetry 跟踪、Token 用量监控
 - 支持本地工具和 MCP 协议扩展
 
 ## 快速开始
@@ -66,8 +68,8 @@ python main.py
 ```
 github-insight-agent/
 ├── src/
-│   ├── core/           # 核心模块（配置、日志、内存）
-│   ├── agents/         # 智能体实现
+│   ├── core/           # 核心模块（配置、日志、内存、Studio 集成）
+│   ├── agents/         # 智能体实现（含 LLM 意图理解）
 │   ├── tools/          # 工具封装（GitHub API、Toolkit）
 │   ├── mcp/            # MCP 客户端
 │   └── types/          # 数据模型
@@ -106,7 +108,7 @@ logger.info("操作成功")
 
 ### 智能体
 
-- `ResearcherAgent`: 负责数据采集和初步分析
+- `ResearcherAgent`: 负责数据采集、LLM 意图理解、工具路由
 - `AnalystAgent`: 负责深度分析和报告生成
 
 ## 扩展开发

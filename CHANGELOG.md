@@ -5,6 +5,17 @@
 - Complete multiple P1/P2 features (Sprint 3-6)
 - *(tools)* Integrate OWASP Top 10 security rules for PR review
 - *(cli)* Enhance CLI with colorful output and better UX
+- *(agents)* Add LLM intent understanding to ResearcherAgent (5 tool types: search/get_repo/analyze/compare/chat)
+- *(agents)* Add `INTENT_TOOLS` function calling definitions and `INTENT_SYSTEM_PROMPT` for LLM-based intent routing
+- *(agents)* Add `_execute_search()`, `_execute_get_repo_info()`, `_execute_analyze_project()`, `_execute_compare()` methods
+- *(core)* Add `studio_integration.py` — AgentScope official Studio integration via `agent.print()` hook
+- *(cli)* Add `_setup_studio()` using `agentscope.init()` for official Studio hooks and tracing
+- *(cli)* Add `_push_to_studio()` for unified CLI→Studio message push (ensures content consistency)
+- *(workflows)* Add intent routing in `ReportGenerator._answer_followup()` for tool-augmented followup handling
+- *(core)* Add per-db_path singleton cache for `PersistentMemory` (fixes connection contention)
+- *(tools)* Add null-content guard in `GitHubTool._clean_content()`
+- *(test)* Add `test_mission_part3.py` with 18 tests for intent tools, execution methods, Studio integration
+- *(test)* Add `test_mission_part2.py` for additional test coverage
 - *(ci)* Add CI workflow and wechat contextToken auto-renewal
 - *(agents)* Create GiaAgentBase as shared base class for all agents
 - *(workflows)* Add AgentPipeline with AgentScope SequentialPipeline orchestration
@@ -28,6 +39,14 @@
 - *(test)* Fix agent integration test to avoid async reply() method (AgentScope hooks)
 - *(security)* Replace all hardcoded model names with DASHSCOPE_MODEL env var
 - *(docs)* Remove Web UI references from architecture diagram (no web UI implemented yet)
+- *(cli)* Refactor Studio integration: use `agentscope.init()` + official `pre_print` hook
+- *(cli)* Unify Studio message push at CLI layer via `_push_to_studio()`
+- *(agents)* Remove `_forward_to_studio()` from `GiaAgentBase`
+- *(cli)* Fix `CommandCompleter` NameError when `prompt_toolkit` is not installed
+- *(workflows)* `ReportGenerator._answer_followup()` routes through LLM intent understanding
+- *(core)* `PersistentMemory` now caches per `db_path`
+- *(fix)* Remove duplicate `import os` in dashscope_wrapper.py
+- *(fix)* Use `DASHSCOPE_MODEL` env var fallback in DashScopeProvider
 
 ### Removed
 

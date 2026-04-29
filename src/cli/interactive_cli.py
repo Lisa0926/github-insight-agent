@@ -22,6 +22,9 @@ try:
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
+    Completer = object  # type: ignore[misc,assignment]
+    Completion = object  # type: ignore[misc,assignment]
+    KeyBindings = object  # type: ignore[misc,assignment]
 
 
 class CommandCompleter(Completer):

@@ -1,7 +1,7 @@
 # GitHub Insight Agent - 架构文档
 
-**版本:** v2.0.0  
-**最后更新:** 2026-04-28
+**版本:** v2.1.0  
+**最后更新:** 2026-04-29
 
 ---
 
@@ -95,39 +95,41 @@
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐
-│ AgentPipeline   │
-│ SequentialPipeline编排 │
-└────────┬────────┘
+┌──────────────────────────────┐
+│ AgentPipeline / 意图路由     │
+│ NaturalLanguageParser /      │
+│ LLM _understand_intent()     │
+└────────┬─────────────────────┘
          │
-         ├── 搜索 ──────────────────┐
-         ▼                          ▼
-┌─────────────────┐         ┌─────────────────┐
-│ ResearcherAgent │         │  GitHub API     │
-│ SequentialPipeline │──────│  获取数据       │
-└────────┬────────┘         └─────────────────┘
+         ├── 搜索 ──────────────────────┐
+         ▼                              ▼
+┌───────────────────────┐      ┌───────────────────────┐
+│ ResearcherAgent       │      │  GitHub API           │
+│ _execute_search()     │──────│  获取数据              │
+└────────┬──────────────┘      └───────────────────────┘
          │
          │ 项目列表
          ▼
-┌─────────────────┐
-│ AnalystAgent    │◄── GitHub 数据
-│ analyze_project │    代码质量
-│ x N 项目        │    OWASP 检测
-└────────┬────────┘
+┌───────────────────────┐
+│ AnalystAgent          │◄── GitHub 数据
+│ analyze_project       │    代码质量
+│ x N 项目              │    OWASP 检测
+└────────┬──────────────┘
          │
          │ 分析报告
          ▼
-┌─────────────────┐
-│ ReportGenerator │
-│ 汇总生成报告     │
-│ (内部格式化引擎) │
-└────────┬────────┘
+┌───────────────────────┐
+│ ReportGenerator       │
+│ 汇总生成报告           │
+│ (含 intent routing)    │
+└────────┬──────────────┘
          │
-         ▼
-┌─────────────────┐
-│  输出到 CLI /   │
-│  定时任务推送    │
-└─────────────────┘
+         ├──► 输出到 CLI 渲染
+         │
+         └──► AgentScope Studio (通过 agent.print hook)
+              - 消息推送 (Msg)
+              - 跟踪 (OpenTelemetry Span)
+              - Token 用量 (ChatUsage)
 ```
 
 ---
@@ -150,8 +152,16 @@ src/agents/
 - **子类**: ResearcherAgent, AnalystAgent
 
 #### ResearcherAgent
-- **职责**: 数据采集与初步分析
-- **核心方法**: `search_and_analyze(query, sort, order, per_page)`
+- **职责**: 数据采集、LLM 意图理解、工具路由
+- **核心方法**:
+  - `search_and_analyze(query, sort, per_page)` — 数据采集
+  - `_understand_intent(query)` — LLM 意图识别（5 类工具：搜索/获取/分析/对比/对话）
+  - `_execute_search(params)` — 执行搜索（含时间范围、排序）
+  - `_execute_get_repo_info(params)` — 获取仓库详情
+  - `_execute_analyze_project(params)` — 委托 Analyst 深度分析
+  - `_execute_compare(params)` — 多项目对比
+- **INTENT_TOOLS**: 5 个 function calling 工具定义 (search_repositories, get_repo_info, analyze_project, compare_repositories, chat)
+- **INTENT_SYSTEM_PROMPT**: LLM 提示词，定义工具选择规则和 JSON 输出格式
 - **输出**: 结构化搜索结果 (项目名、Stars、语言、简介)
 
 #### AnalystAgent
@@ -165,13 +175,15 @@ src/agents/
 
 ```
 src/core/
-├── config_manager.py        # 配置管理 (单例模式)
-├── logger.py                # 日志系统 (loguru 封装)
-├── agentscope_memory.py     # AgentScope 内存封装
-├── agentscope_persistent_memory.py  # 持久化内存 (SQLite)
-├── conversation.py          # 会话管理
-├── resilient_http.py        # 弹性 HTTP 客户端
-└── studio_helper.py         # AgentScope Studio 集成
+├── config_manager.py           # 配置管理 (单例模式)
+├── logger.py                   # 日志系统 (loguru 封装)
+├── agentscope_memory.py        # AgentScope 内存封装
+├── agentscope_persistent_memory.py  # 持久化内存 (SQLite, 按 db_path 缓存)
+├── conversation.py             # 会话管理
+├── resilient_http.py           # 弹性 HTTP 客户端
+├── dashscope_wrapper.py        # DashScope 同步调用包装 (兼容 AgentScope ChatResponse)
+├── studio_helper.py            # AgentScope Studio 自定义转发 (仅 set_studio_config)
+└── studio_integration.py       # AgentScope 官方 Studio 集成 (agent.print hook)
 ```
 
 #### ConfigManager
@@ -184,6 +196,19 @@ api_key = config.get_api_key("YOUR_MODEL_NAME_HERE")
 - **存储**: SQLite (`data/app.db`)
 - **表结构**: `conversation_history`, `memory_index`
 - **功能**: 对话历史持久化、向量索引
+- **缓存策略**: 按 `db_path` 键缓存实例，避免连接竞争
+
+#### Studio 集成 (双模式)
+
+**官方 Hook 模式** (推荐，`studio_integration.py`):
+- 通过 `agentscope.init(studio_url=...)` 注册 `pre_print` hook
+- 使用 `_StudioPushAgent.print(msg)` 推送消息到 Studio
+- 支持 OpenTelemetry 跟踪（`@trace` 装饰器自动记录 Span）
+- CLI 层统一推送，确保 CLI 和 Studio 内容一致
+
+**自定义转发模式** (仅保留用于 agent 级 studio 配置，`studio_helper.py`):
+- 提供 `set_studio_config()` 为 agent 设置自定义 Studio 转发
+- 由 `_setup_studio()` 在 CLI 启动时调用
 
 ---
 
@@ -246,6 +271,11 @@ for repo in search_results:
 
 # 3. 报告生成
 report = generator.generate_report(search_results, analyses)
+
+# 4. 追问处理（含 LLM 意图路由）
+response = generator.handle_followup(user_query)
+# 内部: _understand_intent() → 路由到 _execute_search / _execute_get_repo_info / _execute_compare
+# 或降级: LLM 对话（有上下文）
 ```
 
 ---
@@ -254,9 +284,10 @@ report = generator.generate_report(search_results, analyses)
 
 ```
 src/cli/
-├── app.py                  # CLI 主入口
+├── app.py                  # CLI 主入口 (agentscope.init, Studio 推送, 自然语言路由)
 ├── cli_renderer.py         # 美化输出 (rich 库)
-├── interactive_cli.py      # 交互式 CLI (prompt_toolkit)
+├── interactive_cli.py      # 交互式 CLI (prompt_toolkit, 自动补全, 历史)
+├── natural_language_parser.py  # 自然语言参数提取 (时间/数量/排序)
 └── __init__.py
 ```
 

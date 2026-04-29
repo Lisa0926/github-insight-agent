@@ -123,7 +123,7 @@ class PersistentMemory:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit"""
+        """Context manager exit — close connection"""
         self._run_async(self.close())
 
     def _run_async(self, coro):
@@ -352,7 +352,7 @@ class PersistentMemory:
 
 
 # Convenience function: get singleton PersistentMemory
-_persistent_memory_cache: Optional[PersistentMemory] = None
+_persistent_memory_cache: Dict[str, PersistentMemory] = {}
 
 
 def get_persistent_memory(
@@ -361,7 +361,7 @@ def get_persistent_memory(
     force_new: bool = False,
 ) -> PersistentMemory:
     """
-    Get a PersistentMemory instance (singleton pattern)
+    Get a PersistentMemory instance (singleton per db_path)
 
     Args:
         db_path: SQLite database file path
@@ -373,13 +373,15 @@ def get_persistent_memory(
     """
     global _persistent_memory_cache
 
-    if force_new or _persistent_memory_cache is None:
-        _persistent_memory_cache = PersistentMemory(
+    cache_key = db_path
+
+    if force_new or cache_key not in _persistent_memory_cache:
+        _persistent_memory_cache[cache_key] = PersistentMemory(
             db_path=db_path,
             table_name=table_name,
         )
 
-    return _persistent_memory_cache
+    return _persistent_memory_cache[cache_key]
 
 
 class PersistentMemoryContext:
@@ -403,4 +405,4 @@ class PersistentMemoryContext:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         # Clear singleton cache to allow new instance on next use
         global _persistent_memory_cache
-        _persistent_memory_cache = None
+        _persistent_memory_cache = {}

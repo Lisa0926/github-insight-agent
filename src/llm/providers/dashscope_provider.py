@@ -28,9 +28,8 @@ class DashScopeProvider(LLMProvider):
             model: Default model name (default: from DASHSCOPE_MODEL env var)
         """
         import os
-        self.model = model or os.getenv("DASHSCOPE_MODEL", "")
         self.api_key = api_key
-        self.model = model
+        self.model = model or os.getenv("DASHSCOPE_MODEL", "")
 
     @property
     def provider_name(self) -> str:

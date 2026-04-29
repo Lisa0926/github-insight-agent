@@ -144,7 +144,11 @@ Always be helpful, accurate, and provide actionable recommendations."""
 
     def _add_to_memory(self, role: str, content: str, name: Optional[str] = None) -> None:
         """
-        Add a message to memory and forward to Studio
+        Add a message to memory.
+
+        Studio message forwarding is handled at the CLI level via
+        src.core.studio_integration.push_to_studio() to ensure Studio
+        displays complete output matching CLI display.
 
         Args:
             role: Role (user/assistant/system)
@@ -156,15 +160,6 @@ Always be helpful, accurate, and provide actionable recommendations."""
             content=content,
             name=name or self.name,
         )
-        self._forward_to_studio(name or self.name, content, role)
-
-    def _forward_to_studio(self, name: str, content: str, role: str) -> None:
-        """Forward message to Studio (if enabled)"""
-        try:
-            from src.core.studio_helper import forward_to_studio
-            forward_to_studio(name, content, role)
-        except Exception:
-            pass  # Silent failure, does not affect main flow
 
     # -- AgentBase interface (must be implemented by subclasses) ---
 
