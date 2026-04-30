@@ -24,6 +24,15 @@ from src.core.conversation import ConversationManager
 from src.agents.analyst_agent import AnalystAgent
 from src.agents.researcher_agent import ResearcherAgent
 
+# Import AgentScope tracing
+try:
+    from agentscope.tracing import trace
+except ImportError:
+    def trace(name=None):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -114,6 +123,7 @@ class ReportGenerator:
 
         logger.info("ReportGenerator initialized (with conversation support)")
 
+    @trace(name="report.execute")
     def execute(
         self,
         query: str,
@@ -277,6 +287,7 @@ class ReportGenerator:
 
         return results
 
+    @trace(name="report.generate_report")
     def _generate_report(
         self,
         query: str,
@@ -712,6 +723,7 @@ No matching projects found. Please try:
             return "暂无相关信息"
         return "\n".join(f"{indent}{item}" for item in items)
 
+    @trace(name="report.handle_followup")
     def handle_followup(
         self,
         user_query: str,

@@ -18,6 +18,15 @@ from src.agents.researcher_agent import ResearcherAgent
 from src.agents.analyst_agent import AnalystAgent
 from src.workflows.report_generator import ReportGenerator
 
+# Import AgentScope tracing
+try:
+    from agentscope.tracing import trace
+except ImportError:
+    def trace(name=None):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -77,6 +86,7 @@ class AgentPipeline:
         """Expose current project list to CLI (delegated to internal ReportGenerator)"""
         return self._report_gen._current_projects
 
+    @trace(name="pipeline.execute")
     def execute(
         self,
         query: str,
@@ -205,6 +215,7 @@ class AgentPipeline:
 
         return results
 
+    @trace(name="pipeline.handle_followup")
     def handle_followup(self, user_query: str) -> str:
         """Handle user follow-up questions"""
         return self._report_gen.handle_followup(user_query)

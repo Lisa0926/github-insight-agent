@@ -350,6 +350,7 @@ class ResearcherAgent(GiaAgentBase):
             logger.warning(f"Failed to calculate last commit days: {e}")
             return -1
 
+    @trace(name="researcher.understand_intent")
     def _understand_intent(self, user_query: str) -> Dict[str, Any]:
         """
         Use LLM to understand user intent and select the appropriate tool.
@@ -690,6 +691,7 @@ class ResearcherAgent(GiaAgentBase):
 
         return "\n".join(lines)
 
+    @trace(name="researcher.reply")
     def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
         """Respond to user message"""
         if isinstance(msg, str):
@@ -751,6 +753,7 @@ class ResearcherAgent(GiaAgentBase):
         messages.append({"name": "user", "content": user_query, "role": "user"})
         return messages
 
+    @trace(name="researcher.call_llm")
     def _call_llm(self, user_query: str) -> str:
         """Call LLM to generate a response"""
         try:

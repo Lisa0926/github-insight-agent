@@ -27,6 +27,15 @@ from src.core.logger import get_logger
 from src.core.resilient_http import ResilientHTTPClient, RateLimitError
 from src.types.schemas import GitHubRepo, GitHubSearchResult, ToolResponse
 
+# Import AgentScope tracing (graceful fallback if disabled)
+try:
+    from agentscope.tracing import trace
+except ImportError:
+    def trace(name=None):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -203,6 +212,7 @@ class GitHubTool:
             else:
                 return ToolResponse.fail(error_message=error_msg)
 
+    @trace(name="github.search_repositories")
     def search_repositories(
         self,
         query: str,
@@ -246,6 +256,7 @@ class GitHubTool:
 
         return search_result.items
 
+    @trace(name="github.get_readme")
     def get_readme(self, owner: str, repo: str, ref: str = "HEAD") -> str:
         """
         Get the README content of a specified repository
@@ -284,6 +295,7 @@ class GitHubTool:
             logger.error(f"Failed to decode README: {e}")
             raise RuntimeError(f"Failed to decode README content: {e}")
 
+    @trace(name="github.get_repo_info")
     def get_repo_info(self, owner: str, repo: str) -> GitHubRepo:
         """
         Get detailed information for a single repository

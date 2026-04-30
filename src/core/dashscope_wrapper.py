@@ -14,6 +14,15 @@ from dashscope import Generation
 
 from src.core.logger import get_logger
 
+# Import AgentScope tracing (graceful fallback if disabled)
+try:
+    from agentscope.tracing import trace
+except ImportError:
+    def trace(name=None):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -39,6 +48,7 @@ class DashScopeWrapper:
         if base_url:
             dashscope.base_url = base_url
 
+    @trace(name="dashscope.call")
     def __call__(
         self,
         messages: List[Dict[str, str]],

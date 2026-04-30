@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.so
+
+# Virtual environments
+.env
+.venv/
+venv/
+.venvs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data & reports (persisted in volumes)
+data/
+reports/
+traces/
+*.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs
+docs/
+CHANGELOG.md
+LICENSE
+
+# Tests (not needed in production)
+tests/
+
+# CI/CD
+.github/
+
+# Misc
+*.log
+.DS_Store
+.conda/

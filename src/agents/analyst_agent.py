@@ -337,6 +337,7 @@ class AnalystAgent(GiaAgentBase):
                 "react_thoughts": [f"[Error] 分析失败：{str(e)}"],
             }
 
+    @trace(name="analyst.analyze_with_llm")
     def _analyze_with_llm(self, project_info: str, readme_content: str) -> Dict[str, Any]:
         """
         Call LLM to perform project analysis (using AgentScope DashScopeChatModel)
@@ -673,6 +674,7 @@ class AnalystAgent(GiaAgentBase):
         """
         return "资深技术架构师，擅长通过阅读 README 文档快速判断项目的技术价值。"
 
+    @trace(name="analyst.reply")
     def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
         """
         Respond to user message

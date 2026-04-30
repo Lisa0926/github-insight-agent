@@ -1,0 +1,62 @@
+# GitHub Insight Agent - Docker Compose
+#
+# Usage:
+#   # Basic CLI mode
+#   docker compose up
+#
+#   # With AgentScope Studio
+#   AGENTSCOPE_ENABLE_STUDIO=true docker compose --profile studio up
+#
+#   # Detached mode
+#   docker compose up -d
+#
+#   # Stop
+#   docker compose down
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: github-insight-agent:latest
+    container_name: gia-agent
+    stdin_open: true
+    tty: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      # Override defaults (set in .env or here)
+      # - GIA_DASHSCOPE_API_KEY=
+      # - DASHSCOPE_MODEL=qwen-max
+      # - GITHUB_TOKEN=
+    volumes:
+      # Persist database, reports, traces
+      - gia-data:/app/data
+      - gia-reports:/app/reports
+      - gia-traces:/app/traces
+      # Optional: mount .env file
+      # - ./.env:/app/.env:ro
+    # Uncomment for interactive mode
+    # entrypoint: ["python", "run_cli.py"]
+
+  # AgentScope Studio (optional — for visual tracing + dashboard)
+  studio:
+    profiles:
+      - studio
+    image: agentscope/studio:latest
+    container_name: gia-studio
+    ports:
+      - "3000:3000"
+    volumes:
+      - studio-data:/app/data
+    environment:
+      - NODE_ENV=production
+
+volumes:
+  gia-data:
+  gia-reports:
+  gia-traces:
+  studio-data:

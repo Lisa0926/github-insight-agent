@@ -201,7 +201,7 @@ class GitHubRepo(BaseModel):
             stargazers_count=data.get("stargazers_count", 0),
             language=data.get("language") or "",
             description=data.get("description") or "",
-            topics=data.get("topics", []),
+            topics=data.get("topics") or [],
             updated_at=data.get("updated_at", ""),
             forks_count=data.get("forks_count", 0),
             watchers_count=data.get("watchers_count", 0),

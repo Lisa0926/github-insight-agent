@@ -20,24 +20,48 @@ from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
 from src.core.guardrails import sanitize_user_input, requires_confirmation  # noqa: E402
+from src.core.feedback import get_feedback_collector, FeedbackSession  # noqa: E402
 import agentscope
 from src.core.config_manager import ConfigManager  # noqa: E402
 from src.workflows.agent_pipeline import AgentPipeline  # noqa: E402
 
 
-def _setup_studio(config: ConfigManager) -> None:
-    """Initialize AgentScope Studio connection."""
-    studio_url = config.agentscope_studio_url
-    run_name = config.agentscope_run_name
+def _setup_tracing(config: ConfigManager) -> None:
+    """Initialize OpenTelemetry tracing (standalone, without Studio).
 
-    # Call agentscope.init() to register official Studio hooks and tracing
+    Supports external OTel backends like Arize Phoenix, Langfuse, etc.
+    """
+    tracing_url = config.agentscope_tracing_url
+    if not tracing_url:
+        return
+
     try:
         agentscope.init(
             project="GitHub Insight Agent",
-            name=run_name,
-            run_id=run_name,
-            studio_url=studio_url,
+            tracing_url=tracing_url,
         )
+        print(f"[Tracing] Enabled (endpoint: {tracing_url})")
+    except Exception as e:
+        print(f"[Tracing] Failed to init: {e}")
+
+
+def _setup_studio(config: ConfigManager) -> None:
+    """Initialize AgentScope Studio connection with tracing."""
+    studio_url = config.agentscope_studio_url
+    run_name = config.agentscope_run_name
+    tracing_url = config.agentscope_tracing_url if config.agentscope_enable_tracing else None
+
+    init_kwargs = dict(
+        project="GitHub Insight Agent",
+        name=run_name,
+        run_id=run_name,
+        studio_url=studio_url,
+    )
+    if tracing_url:
+        init_kwargs["tracing_url"] = tracing_url
+
+    try:
+        agentscope.init(**init_kwargs)
     except Exception as e:
         print(f"[Studio] Failed to init: {e}")
 
@@ -69,6 +93,9 @@ def print_welcome():
         "/report <关键词>": "生成详细分析报告",
         "/pr": "审查 Pull Request (粘贴 diff)",
         "/scan <文件>": "安全扫描代码",
+        "/rate <good|bad> [理由]": "对上次回复打分",
+        "/feedback <文本>": "提交详细反馈",
+        "/feedback-stats": "查看反馈统计",
         "/history": "显示对话历史",
         "/clear": "清空对话",
         "/export <路径>": "导出对话记录",
@@ -151,8 +178,16 @@ def run_interactive_mode():  # noqa: C901
     else:
         studio_enabled = False
 
+    # Standalone tracing without Studio (headless / OTel backend)
+    if not config.agentscope_enable_studio and config.agentscope_enable_tracing:
+        _setup_tracing(config)
+
     # Initialize report generator
     report_gen = AgentPipeline()
+
+    # Initialize feedback session
+    feedback_collector = get_feedback_collector()
+    feedback_session = FeedbackSession(run_id=config.agentscope_run_name)
 
     while True:
         try:
@@ -177,6 +212,9 @@ def run_interactive_mode():  # noqa: C901
                         "/report <关键词>": "生成详细分析报告",
                         "/pr": "审查 Pull Request (粘贴 diff)",
                         "/scan <文件>": "安全扫描代码",
+                        "/rate <good|bad> [理由]": "对上次回复打分",
+                        "/feedback <文本>": "提交详细反馈",
+                        "/feedback-stats": "查看反馈统计",
                         "/history": "显示对话历史",
                         "/clear": "清空对话",
                         "/export <路径>": "导出对话记录",
@@ -280,6 +318,7 @@ def run_interactive_mode():  # noqa: C901
                         "API Key": "已配置" if config.dashscope_api_key else "未配置",
                         "调试模式": "开启" if config.debug_mode else "关闭",
                         "Studio": "开启" if config.agentscope_enable_studio else "关闭",
+                        "Tracing": "开启" if config.agentscope_enable_tracing else "关闭",
                     }
                     renderer.print_stats(stats, title="当前配置")
 
@@ -295,6 +334,59 @@ def run_interactive_mode():  # noqa: C901
                 elif command == "/scan":
                     # TODO: Security scanning functionality
                     renderer.print_success("安全扫描功能开发中")
+
+                elif command == "/rate":
+                    # Usage: /rate good|bad [reason]
+                    parts = args.split(maxsplit=1)
+                    if not parts:
+                        renderer.print_error("用法：/rate good|bad [理由]")
+                        renderer.print_info("例：/rate good 分析结果很准确")
+                        continue
+
+                    rating = parts[0].lower()
+                    reason = parts[1] if len(parts) > 1 else ""
+
+                    if rating not in ("good", "bad", "g", "b"):
+                        renderer.print_error("评分必须是 good 或 bad")
+                        continue
+
+                    if rating in ("g", "b"):
+                        rating = "good" if rating == "g" else "bad"
+
+                    row_id = feedback_collector.record_quick(
+                        rating=rating,
+                        reason=reason,
+                        session_state=feedback_session,
+                    )
+                    emoji = "👍" if rating == "good" else "👎"
+                    renderer.print_success(f"已记录反馈 [{emoji} {rating}] (id={row_id})")
+
+                elif command == "/feedback":
+                    # Usage: /feedback "text"
+                    if not args.strip():
+                        renderer.print_error("用法：/feedback <反馈内容>")
+                        renderer.print_info("例：/feedback 希望能支持更多语言的分析")
+                        continue
+
+                    row_id = feedback_collector.record(
+                        rating="neutral",
+                        reason=args.strip(),
+                        user_input=feedback_session.last_user_input,
+                        assistant_output=feedback_session.last_assistant_output,
+                        agent=feedback_session.current_agent,
+                        run_id=feedback_session.run_id,
+                    )
+                    renderer.print_success(f"已记录反馈 (id={row_id})")
+
+                elif command == "/feedback-stats":
+                    stats = feedback_collector.get_stats()
+                    renderer.print_panel(
+                        "📊 反馈统计",
+                        f"总反馈: {stats['total']}\n"
+                        f"👍 好评: {stats['good']}  |  👎 差评: {stats['bad']}\n"
+                        f"中立: {stats['neutral']}  |  好评率: {stats['positive_rate']}%",
+                        style="green",
+                    )
 
                 else:
                     renderer.print_error(f"未知命令：{command}", "输入 /help 查看可用命令")
@@ -313,15 +405,18 @@ def run_interactive_mode():  # noqa: C901
 
                 if parsed.intent == IntentType.FOLLOWUP and has_context:
                     # Follow-up mode
+                    feedback_session.set_agent("followup")
                     with renderer.create_progress("Agent 思考中..."):
                         response = report_gen.handle_followup(user_input)
                     renderer.print_panel("🤖 Agent", response, style="cyan")
+                    feedback_session.set_last_interaction(safe_input, response)
                     if studio_enabled:
                         _push_to_studio("user", user_input, "user")
                         _push_to_studio("Agent", response, "assistant")
 
                 elif parsed.intent == IntentType.ANALYZE:
                     # Analyze a single project
+                    feedback_session.set_agent("analyst")
                     query_parts = parsed.query.split("/")
                     if len(query_parts) == 2:
                         owner, repo = query_parts
@@ -340,6 +435,7 @@ def run_interactive_mode():  # noqa: C901
                                 f"推荐意见：{analysis.get('recommendation', 'N/A')}"
                             )
                             renderer.print_panel("📊 分析结果", resp, style="green")
+                        feedback_session.set_last_interaction(safe_input, resp)
                         if studio_enabled:
                             _push_to_studio("user", f"分析项目：{owner}/{repo}", "user")
                             _push_to_studio("Analyst", resp, "assistant")
@@ -348,6 +444,7 @@ def run_interactive_mode():  # noqa: C901
 
                 elif parsed.intent == IntentType.SEARCH:
                     # Search projects
+                    feedback_session.set_agent("researcher")
                     query = parsed.query
                     time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
                     with renderer.create_progress(f"搜索：{query}{time_desc}"):
@@ -378,12 +475,14 @@ def run_interactive_mode():  # noqa: C901
                     else:
                         renderer.print_warning("未找到相关项目")
                         forwarded_content = f"搜索「{query}」未找到相关项目"
+                    feedback_session.set_last_interaction(safe_input, forwarded_content)
                     if studio_enabled:
                         _push_to_studio("user", f"搜索：{query}{time_desc}", "user")
                         _push_to_studio("Researcher", forwarded_content, "assistant")
 
                 elif parsed.intent == IntentType.REPORT:
                     # Generate detailed report
+                    feedback_session.set_agent("report")
                     query = parsed.query
                     time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
                     with renderer.create_progress(f"生成报告：{query}{time_desc}"):
@@ -395,20 +494,23 @@ def run_interactive_mode():  # noqa: C901
                     renderer.print_success("报告生成完成！")
                     # Display full report (truncate reports exceeding 10,000 characters)
                     display_limit = 10000
+                    display_report = report[:display_limit] if len(report) > display_limit else report
+                    feedback_session.set_last_interaction(safe_input, display_report)
                     if len(report) > display_limit:
-                        renderer.print_panel("📄 报告", report[:display_limit])
+                        renderer.print_panel("📄 报告", display_report)
                         renderer.print_warning(f"报告已截断（{len(report)} 字符，显示前 {display_limit} 字符）")
                         if studio_enabled:
                             _push_to_studio("user", f"生成报告：{query}{time_desc}", "user")
-                            _push_to_studio("Report", report[:8000], "assistant")
+                            _push_to_studio("Report", display_report[:8000], "assistant")
                     else:
-                        renderer.print_panel("📄 报告", report)
+                        renderer.print_panel("📄 报告", display_report)
                         if studio_enabled:
                             _push_to_studio("user", f"生成报告：{query}{time_desc}", "user")
-                            _push_to_studio("Report", report[:8000], "assistant")
+                            _push_to_studio("Report", display_report[:8000], "assistant")
 
                 else:
                     # Unknown intent, try to handle as search
+                    feedback_session.set_agent("researcher")
                     with renderer.create_progress(f"搜索：{user_input}"):
                         search_result = report_gen.researcher.search_and_analyze(
                             query=user_input,
@@ -428,6 +530,7 @@ def run_interactive_mode():  # noqa: C901
                     else:
                         renderer.print_warning("未找到相关项目，请尝试其他关键词")
                         forwarded_content = f"搜索「{user_input}」未找到相关项目"
+                    feedback_session.set_last_interaction(safe_input, forwarded_content)
                     if studio_enabled:
                         _push_to_studio("user", user_input, "user")
                         _push_to_studio("Researcher", forwarded_content, "assistant")
