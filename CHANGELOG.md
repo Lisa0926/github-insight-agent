@@ -3,6 +3,13 @@
 ### Added
 
 - Complete multiple P1/P2 features (Sprint 3-6)
+- *(security)* Add Dimension 3 guardrails module: prompt injection protection, output filtering, agent circuit breaker, human-in-the-loop
+- *(agents)* Wire `sanitize_user_input()` into ResearcherAgent intent understanding and CLI input paths
+- *(agents)* Wire `filter_sensitive_output()` into all LLM response paths (Researcher, Analyst, ReportGenerator followup)
+- *(workflows)* Integrate `AgentCircuitBreaker` in ReportGenerator execute pipeline (max_steps=50, max_time=180s, max_tokens=5000)
+- *(cli)* Add input sanitization for `/analyze`, `/search`, and natural language commands
+- *(tools)* Add output filtering to Toolkit tool responses (get_readme, get_project_summary)
+- *(test)* Add 26 guardrail tests (TestPromptInjectionProtection, TestOutputFiltering, TestAgentCircuitBreaker, TestHumanInTheLoop)
 - *(tools)* Integrate OWASP Top 10 security rules for PR review
 - *(cli)* Enhance CLI with colorful output and better UX
 - *(agents)* Add LLM intent understanding to ResearcherAgent (5 tool types: search/get_repo/analyze/compare/chat)

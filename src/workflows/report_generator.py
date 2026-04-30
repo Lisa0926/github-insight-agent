@@ -15,8 +15,10 @@ This is a linear workflow demonstrating the basic pattern of multi-Agent collabo
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import time
 
 from src.core.config_manager import ConfigManager
+from src.core.guardrails import get_circuit_breaker, filter_sensitive_output
 from src.core.logger import get_logger
 from src.core.conversation import ConversationManager
 from src.agents.analyst_agent import AnalystAgent
@@ -129,34 +131,63 @@ class ReportGenerator:
         Returns:
             Report in Markdown format
         """
+        # TTI (Time-to-Insight) tracking
+        tti_start = time.time()
+        step_start = tti_start
+
         logger.info(f"Starting report generation: '{query}' (num_projects={num_projects})")
+
+        # Start circuit breaker session
+        cb = get_circuit_breaker()
+        cb.start_session()
 
         # Clear previous conversation and projects (start a new session)
         self.clear_conversation()
 
         # Step 1: Search for projects
         logger.info("[Step 1/3] Searching for projects...")
+        cb.check()
         search_results = self._search_projects(query, num_projects, sort)
+        search_tti = time.time() - step_start
+        step_start = time.time()
 
         if not search_results:
             return self._generate_empty_report(query)
 
         # Step 2: In-depth analysis of each project
         logger.info("[Step 2/3] Analyzing projects...")
+        cb.check()
         analysis_results = self._analyze_projects(search_results)
+        analysis_tti = time.time() - step_start
+        step_start = time.time()
 
         # Save current analyzed projects (used for follow-up context)
         self._current_projects = analysis_results
 
         # Step 3: Generate aggregated report
         logger.info("[Step 3/3] Generating report...")
+        cb.check()
         report = self._generate_report(query, search_results, analysis_results)
+        report_tti = time.time() - step_start
+
+        # Calculate total TTI
+        total_tti = time.time() - tti_start
+        logger.info(
+            f"TTI metrics: search={search_tti:.1f}s, analysis={analysis_tti:.1f}s, "
+            f"report={report_tti:.1f}s, total={total_tti:.1f}s"
+        )
 
         self.results = {
             "query": query,
             "search_results": search_results,
             "analysis_results": analysis_results,
             "report": report,
+            "tti": {
+                "search": round(search_tti, 2),
+                "analysis": round(analysis_tti, 2),
+                "report": round(report_tti, 2),
+                "total": round(total_tti, 2),
+            },
         }
 
         # Record to conversation history
@@ -804,6 +835,10 @@ No matching projects found. Please try:
 
             response = model_wrapper(messages=messages)
             content = self.analyst._extract_response_text(response)
+
+            # Filter sensitive data from LLM output
+            content = filter_sensitive_output(content)
+
             logger.info(f"Followup answer generated: {len(content)} chars")
 
             # Record ReAct thinking process (optional)

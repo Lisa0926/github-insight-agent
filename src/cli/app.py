@@ -19,6 +19,7 @@ sys.path.insert(0, str(project_root))
 from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
+from src.core.guardrails import sanitize_user_input, requires_confirmation  # noqa: E402
 import agentscope
 from src.core.config_manager import ConfigManager  # noqa: E402
 from src.workflows.agent_pipeline import AgentPipeline  # noqa: E402
@@ -193,6 +194,13 @@ def run_interactive_mode():  # noqa: C901
                         renderer.print_error("请输入完整的项目名", "格式：owner/repo")
                         continue
 
+                    # Sanitize input
+                    try:
+                        args = sanitize_user_input(args)
+                    except ValueError as e:
+                        renderer.print_error("输入被拦截", str(e))
+                        continue
+
                     owner, repo = args.split("/", 1)
 
                     with renderer.create_progress("分析项目中..."):  # noqa: F841
@@ -215,8 +223,15 @@ def run_interactive_mode():  # noqa: C901
                         renderer.print_error("用法：/search <关键词>", "例如：/search Python web framework")
                         continue
 
-                    with renderer.create_progress(f"搜索：{args}"):  # noqa: F841
-                        search_result = report_gen.researcher.search_and_analyze(query=args, sort="stars", per_page=5)
+                    # Sanitize input
+                    try:
+                        safe_search = sanitize_user_input(args)
+                    except ValueError as e:
+                        renderer.print_error("输入被拦截", str(e))
+                        continue
+
+                    with renderer.create_progress(f"搜索：{safe_search}"):  # noqa: F841
+                        search_result = report_gen.researcher.search_and_analyze(query=safe_search, sort="stars", per_page=5)
 
                     repos = search_result.get("repositories", [])
                     if repos:
@@ -286,8 +301,15 @@ def run_interactive_mode():  # noqa: C901
 
             else:
                 # Natural language input - intelligent intent recognition
+                # Sanitize user input to prevent prompt injection
+                try:
+                    safe_input = sanitize_user_input(user_input)
+                except ValueError as e:
+                    renderer.print_error("输入被拦截", str(e))
+                    continue
+
                 has_context = bool(report_gen._current_projects)
-                parsed = nl_parser.parse(user_input, has_context=has_context)
+                parsed = nl_parser.parse(safe_input, has_context=has_context)
 
                 if parsed.intent == IntentType.FOLLOWUP and has_context:
                     # Follow-up mode
@@ -399,7 +421,7 @@ def run_interactive_mode():  # noqa: C901
                         renderer.print_info(f"找到 {len(repos)} 个项目")
                         renderer.print_panel("💡 提示", "使用 '分析第一个' 或 '对比前 3 个' 继续交互")
                         # Build forwarded content
-                        repo_lines = [f"## 搜索结果\n"]
+                        repo_lines = ["## 搜索结果\n"]
                         for r in repos[:5]:
                             repo_lines.append(f"- **{r['full_name']}** ⭐ {r['stars']:,} {r.get('language', '')}")
                         forwarded_content = "\n".join(repo_lines)

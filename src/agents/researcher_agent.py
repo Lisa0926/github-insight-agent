@@ -12,6 +12,7 @@ Features:
 """
 
 import json
+import time
 from typing import Any, Dict, List, Optional, Union
 import re
 from datetime import datetime, timedelta
@@ -19,10 +20,10 @@ from datetime import datetime, timedelta
 from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
+from src.core.guardrails import sanitize_user_input, filter_sensitive_output
 from src.core.logger import get_logger
 from src.core.studio_helper import StudioHelper, set_global_studio_config
 from src.tools.github_tool import GitHubTool
-from src.tools.tool_registry import register_github_tools, global_registry
 from src.tools.github_toolkit import get_github_toolkit
 from src.agents.base_agent import GiaAgentBase
 
@@ -277,9 +278,9 @@ class ResearcherAgent(GiaAgentBase):
 
         self.use_toolkit = use_toolkit
         self.use_mcp = use_mcp
+        self.use_persistent = use_persistent
 
         self.github_tool = GitHubTool(config=self.config)
-        register_github_tools(self.github_tool)
 
         self.toolkit = None
         if use_toolkit:
@@ -287,6 +288,67 @@ class ResearcherAgent(GiaAgentBase):
             logger.info("AgentScope Toolkit initialized with GitHub tools")
 
         logger.info(f"ResearcherAgent '{name}' initialized with model '{model_name}'")
+
+    def _calculate_trend_score(self, repo) -> float:
+        """
+        Calculate trend score for a repository (0.0-1.0).
+
+        Composite metric based on:
+        - Star count (logarithmic scaling)
+        - Fork-to-star ratio (community engagement)
+        - Topic count (project categorization)
+        - Language presence (language popularity proxy)
+        """
+        try:
+            score = 0.0
+
+            # Star score (0-0.4): logarithmic scaling
+            stars = getattr(repo, 'stargazers_count', 0) or 0
+            if stars > 0:
+                score += min(0.4, 0.4 * (1.0 - 1.0 / (1.0 + stars / 1000.0)))
+
+            # Fork score (0-0.2): fork-to-star ratio
+            forks = getattr(repo, 'forks_count', 0) or 0
+            if stars > 0 and forks > 0:
+                fork_ratio = min(forks / max(stars, 1), 0.5)
+                score += 0.2 * (fork_ratio / 0.5)
+
+            # Topic score (0-0.2): more topics = better categorized
+            topics = getattr(repo, 'topics', []) or []
+            score += 0.2 * min(len(topics) / 10.0, 1.0)
+
+            # Language score (0-0.2): active language presence
+            lang = getattr(repo, 'language', '') or ''
+            if lang:
+                score += 0.1
+            watchers = getattr(repo, 'watchers_count', 0) or 0
+            if watchers > 0:
+                score += 0.1 * min(watchers / max(stars, 1), 1.0)
+
+            return round(min(score, 1.0), 3)
+        except Exception as e:
+            logger.warning(f"Failed to calculate trend score: {e}")
+            return 0.0
+
+    def _calculate_last_commit_days(self, repo) -> int:
+        """
+        Calculate days since last update (commit/activity).
+        Returns -1 if unknown.
+        """
+        try:
+            updated_at = getattr(repo, 'updated_at', None)
+            if not updated_at:
+                return -1
+            if isinstance(updated_at, str):
+                updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+            # Strip tzinfo for naive comparison
+            if hasattr(updated_at, 'replace') and updated_at.tzinfo is not None:
+                updated_at = updated_at.replace(tzinfo=None)
+            delta = datetime.now() - updated_at
+            return delta.days
+        except Exception as e:
+            logger.warning(f"Failed to calculate last commit days: {e}")
+            return -1
 
     def _understand_intent(self, user_query: str) -> Dict[str, Any]:
         """
@@ -302,10 +364,13 @@ class ResearcherAgent(GiaAgentBase):
             on failure.
         """
         try:
+            # Sanitize user input to prevent prompt injection
+            safe_query = sanitize_user_input(user_query)
+
             model_wrapper = self._get_model_wrapper()
             messages = [
                 {"name": "system", "content": INTENT_SYSTEM_PROMPT, "role": "system"},
-                {"name": "user", "content": user_query, "role": "user"},
+                {"name": "user", "content": safe_query, "role": "user"},
             ]
             response = model_wrapper(
                 messages=messages,
@@ -571,6 +636,10 @@ class ResearcherAgent(GiaAgentBase):
                         "language": repo.language,
                         "description": repo.description,
                         "topics": repo.topics,
+                        "trend_score": self._calculate_trend_score(repo),
+                        "readme_snippet": "",  # Fetched on-demand by AnalystAgent
+                        "last_commit_days": self._calculate_last_commit_days(repo),
+                        "tags": repo.topics or [],
                     }
                     for repo in repos
                 ],
@@ -645,6 +714,13 @@ class ResearcherAgent(GiaAgentBase):
         """
         logger.info(f"Received query: {user_query}")
 
+        # Sanitize user input to prevent prompt injection
+        try:
+            user_query = sanitize_user_input(user_query)
+        except ValueError as e:
+            logger.warning(f"Input blocked: {e}")
+            return f"⚠️ {e}"
+
         # Step 1: Use LLM to understand intent
         intent = self._understand_intent(user_query)
         action = intent["action"]
@@ -682,6 +758,8 @@ class ResearcherAgent(GiaAgentBase):
             messages = self._build_messages(user_query)
             response = model_wrapper(messages=messages)
             content = self._extract_response_text(response)
+            # Filter sensitive data from LLM output
+            content = filter_sensitive_output(content)
             self._add_to_memory("assistant", content)
             return content
         except Exception as e:
@@ -690,28 +768,35 @@ class ResearcherAgent(GiaAgentBase):
 
     def get_status(self) -> Dict[str, Any]:
         """Get Agent status"""
+        # Get available tool names from toolkit
+        tools_available = []
+        if self.toolkit:
+            schemas = self.toolkit.get_json_schemas()
+            tools_available = [
+                s.get('function', {}).get('name', '')
+                for s in schemas if s.get('function', {}).get('name')
+            ]
         status = {
             "name": self.name,
             "model": self.model_name,
             "memory_size": self.memory.size(),
-            "tools_available": global_registry.get_registered_tools(),
+            "tools_available": tools_available,
             "github_token_configured": bool(self.config.github_token),
             "toolkit_enabled": self.toolkit is not None,
             "mcp_enabled": self.use_mcp,
             "persistent_enabled": self.use_persistent,
             "intent_understanding": "LLM function calling",
-        }
-        if self.toolkit:
-            schemas = self.toolkit.get_json_schemas()
-            mcp_tool_names = [
+            "mcp_tool_names": [
                 'get_commit', 'get_file_contents', 'get_label', 'get_latest_release',
                 'get_me', 'get_release_by_tag', 'get_tag', 'issue_read',
                 'list_branches', 'list_commits', 'list_issues', 'list_pull_requests',
                 'list_releases', 'list_tags', 'pull_request_read', 'search_code',
                 'search_issues', 'search_pull_requests', 'search_repositories', 'search_users'
-            ]
-            mcp_schemas = [s for s in schemas if s.get('function', {}).get('name', '') in mcp_tool_names]
+            ],
+        }
+        if self.toolkit:
             status["toolkit_schemas"] = len(schemas)
+            mcp_schemas = [s for s in schemas if s.get('function', {}).get('name', '') in status["mcp_tool_names"]]
             status["mcp_tools_count"] = len(mcp_schemas)
         return status
 

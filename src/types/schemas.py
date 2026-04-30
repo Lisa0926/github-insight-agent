@@ -308,3 +308,67 @@ class ModelResponse(BaseModel):
     role: str = Field("assistant", description="角色")
     model: str = Field("", description="使用的模型")
     usage: Dict[str, int] = Field(default_factory=dict, description="Token 使用情况")
+
+
+# ===========================================
+# Role KPI Contract Models (role_kpi.yaml)
+# ===========================================
+
+
+class ProjectFact(BaseModel):
+    """
+    Researcher output contract — per role_kpi.yaml List[ProjectFact]
+
+    Structured representation of a single GitHub project's factual data,
+    produced by the Researcher agent (开源情报侦察员).
+    """
+
+    owner: str = Field(..., description="仓库所有者 (owner)")
+    repo: str = Field(..., description="仓库名称 (repo)")
+    stars: int = Field(0, description="当前 Star 数")
+    lang: str = Field("", description="主要编程语言")
+    readme_snippet: str = Field("", description="README 摘要 (max 2000 chars)")
+    trend_score: float = Field(0.0, description="趋势评分 (0.0-1.0)", ge=0.0, le=1.0)
+    last_commit_days: int = Field(-1, description="距上次提交的天数 (-1=未知)")
+    tags: List[str] = Field(default_factory=list, description="标签列表")
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.repo}"
+
+
+class ScoreBreakdown(BaseModel):
+    """Analyst score breakdown for a single project analysis."""
+
+    functionality: float = Field(0.0, description="功能完整度评分", ge=0.0, le=1.0)
+    code_quality: float = Field(0.0, description="代码质量评分", ge=0.0, le=1.0)
+    security: float = Field(0.0, description="安全评分", ge=0.0, le=1.0)
+    maintainability: float = Field(0.0, description="可维护性评分", ge=0.0, le=1.0)
+    community: float = Field(0.0, description="社区活跃度评分", ge=0.0, le=1.0)
+
+
+class ProjectAnalysisReport(BaseModel):
+    """
+    Analyst output contract — per role_kpi.yaml ProjectAnalysisReport
+
+    Structured technical value assessment, produced by the Analyst agent
+    (资深技术架构师) based on ProjectFact input from Researcher.
+    """
+
+    core_function: str = Field(..., description="核心功能描述")
+    tech_stack: List[str] = Field(default_factory=list, description="识别到的技术栈")
+    architecture_pattern: str = Field("", description="架构模式 (Monorepo/Microservices/CLI/SDK 等)")
+    pain_points: List[str] = Field(default_factory=list, description="解决的痛点列表")
+    suitability: str = Field("", description="适用场景描述")
+    risk_flags: List[str] = Field(default_factory=list, description="风险标记")
+    score_breakdown: ScoreBreakdown = Field(default_factory=ScoreBreakdown, description="评分细分")
+    suitability_score: float = Field(0.0, description="适配度评分 (0.0-1.0)", ge=0.0, le=1.0)
+
+
+# Sentinel flag for insufficient data (per role_kpi.yaml data_integrity)
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
+def is_insufficient_data(value: Any) -> bool:
+    """Check if a value indicates insufficient data."""
+    return value is INSUFFICIENT_DATA or (isinstance(value, str) and value == INSUFFICIENT_DATA)

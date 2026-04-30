@@ -2,16 +2,11 @@
 """Tools module: GitHub API, data analysis, and other utilities"""
 
 from .github_tool import GitHubTool
-from .tool_registry import ToolRegistry, global_registry, register_github_tools, ToolInfo
 from .code_quality_tool import CodeQualityScorer, evaluate_code_quality
 from .pr_review_tool import PRReviewer, review_pull_request
 
 __all__ = [
     "GitHubTool",
-    "ToolRegistry",
-    "global_registry",
-    "register_github_tools",
-    "ToolInfo",
     "CodeQualityScorer",
     "evaluate_code_quality",
     "PRReviewer",

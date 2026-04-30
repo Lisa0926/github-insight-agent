@@ -14,7 +14,7 @@ Note:
 - Uses runtime checks instead of ABC's abstract method checks
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from agentscope.agent import AgentBase
 from agentscope.message import Msg

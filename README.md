@@ -8,7 +8,7 @@
 |------|----------|--------|
 | [![CI](https://github.com/Lisa0926/github-insight-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lisa0926/github-insight-agent/actions) | ![pip-audit](https://img.shields.io/badge/pip--audit-pass-green) | ![codecov](https://img.shields.io/badge/codecov-100%25-green) |
 
-**最近执行结果**: 90/90 测试通过，0 安全漏洞
+**最近执行结果**: 210/210 测试通过，0 安全漏洞
 
 ## 功能特性
 
@@ -18,6 +18,7 @@
 - 代码质量分析和趋势报告生成
 - AgentScope Studio 可视化：实时消息推送、OpenTelemetry 跟踪、Token 用量监控
 - 支持本地工具和 MCP 协议扩展
+- 安全护栏：Prompt 注入防护、敏感数据脱敏、Agent 熔断器、高危操作人工确认
 
 ## 快速开始
 

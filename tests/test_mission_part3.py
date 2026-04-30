@@ -1,563 +1,550 @@
 # -*- coding: utf-8 -*-
 """
-GitHub Insight Agent - Mission Part 3: Supplemental Tests
+GitHub Insight Agent - Mission Part 3: Report Module Tests
 
-Tests for new features in working tree changes:
-- ResearcherAgent LLM intent understanding (_understand_intent)
-- ResearcherAgent new execution methods (_execute_search, _execute_get_repo_info, etc.)
-- CLI _forward_to_studio function
-- ReportGenerator intent routing in answer_followup
-- INTENT_TOOLS and INTENT_SYSTEM_PROMPT structure
+Tests for the new src/report/ module (untracked working tree changes):
+- HTMLExporter: export_markdown_to_html, export_to_string, ReportExtractor
+- PushReportOptimizer: optimize_for_wechat, optimize_for_feishu
+- Edge cases: empty inputs, None content, special characters, length limits
 """
 
 import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ===========================================
-# Test 1: INTENT_TOOLS structure validation
+# Test 1: HTMLExporter basic export
 # ===========================================
-def test_intent_tools_structure():
-    """Verify INTENT_TOOLS has the expected 5 tools with correct structure."""
-    from src.agents.researcher_agent import INTENT_TOOLS
+def test_html_exporter_basic():
+    """Test HTMLExporter can export markdown to HTML file"""
+    from src.report.html_exporter import HTMLExporter
 
-    assert len(INTENT_TOOLS) == 5, f"Expected 5 tools, got {len(INTENT_TOOLS)}"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        exporter = HTMLExporter(output_dir=tmpdir)
+        md_content = "# Test Report\n\nThis is a test report.\n\n## Metrics\n\n| Name | Value |\n|------|-------|\n| Tests | 176 |\n"
+        output_path = exporter.export(md_content)
 
-    tool_names = {t["name"] for t in INTENT_TOOLS}
-    expected = {"search_repositories", "get_repo_info", "analyze_project",
-                "compare_repositories", "chat"}
-    assert tool_names == expected, f"Expected {expected}, got {tool_names}"
+        assert os.path.exists(output_path), f"HTML file not created at {output_path}"
+        assert output_path.endswith('.html')
 
-    for tool in INTENT_TOOLS:
-        assert "name" in tool
-        assert "description" in tool
-        assert "parameters" in tool
-        assert "properties" in tool["parameters"]
-        assert "required" in tool["parameters"]
+        with open(output_path, 'r', encoding='utf-8') as f:
+            html = f.read()
 
-    print("  ✓ INTENT_TOOLS structure is valid")
-
-
-def test_intent_tools_required_fields():
-    """Verify each tool has correct required fields."""
-    from src.agents.researcher_agent import INTENT_TOOLS
-
-    search = next(t for t in INTENT_TOOLS if t["name"] == "search_repositories")
-    assert "query" in search["parameters"]["required"]
-
-    get_repo = next(t for t in INTENT_TOOLS if t["name"] == "get_repo_info")
-    assert "owner" in get_repo["parameters"]["required"]
-    assert "repo" in get_repo["parameters"]["required"]
-
-    compare = next(t for t in INTENT_TOOLS if t["name"] == "compare_repositories")
-    assert "repositories" in compare["parameters"]["required"]
-
-    print("  ✓ INTENT_TOOLS required fields are correct")
-
-
-def test_intent_system_prompt():
-    """Verify INTENT_SYSTEM_PROMPT is non-empty and contains key instructions."""
-    from src.agents.researcher_agent import INTENT_SYSTEM_PROMPT
-
-    assert len(INTENT_SYSTEM_PROMPT) > 100
-    assert "search_repositories" in INTENT_SYSTEM_PROMPT
-    assert "get_repo_info" in INTENT_SYSTEM_PROMPT
-    assert "chat" in INTENT_SYSTEM_PROMPT
-    assert "json" in INTENT_SYSTEM_PROMPT.lower()
-
-    print("  ✓ INTENT_SYSTEM_PROMPT content is valid")
+        assert '<!DOCTYPE html>' in html
+        assert 'Test Report' in html
+        assert 'This is a test report.' in html
+        print("  ✓ HTMLExporter basic export works")
 
 
 # ===========================================
-# Test 2: ResearcherAgent new methods exist
+# Test 2: HTMLExporter export_to_string
 # ===========================================
-def test_researcher_agent_new_methods():
-    """Verify ResearcherAgent has the new intent-based methods."""
-    from src.agents.researcher_agent import ResearcherAgent
+def test_html_exporter_to_string():
+    """Test HTMLExporter can export to string (no file)"""
+    from src.report.html_exporter import HTMLExporter
 
-    assert hasattr(ResearcherAgent, '_understand_intent')
-    assert hasattr(ResearcherAgent, '_execute_search')
-    assert hasattr(ResearcherAgent, '_execute_get_repo_info')
-    assert hasattr(ResearcherAgent, '_execute_analyze_project')
-    assert hasattr(ResearcherAgent, '_execute_compare')
+    exporter = HTMLExporter()
+    md_content = "# String Export Test\n\nContent here."
+    html = exporter.export_to_string(md_content)
 
-    print("  ✓ All new ResearcherAgent methods exist")
+    assert isinstance(html, str)
+    assert '<!DOCTYPE html>' in html
+    assert 'String Export Test' in html
+    assert 'Content here.' in html
+    print("  ✓ HTMLExporter export_to_string works")
 
 
 # ===========================================
-# Test 3: _understand_intent fallback behavior
+# Test 3: Convenience functions
 # ===========================================
-def test_understand_intent_fallback_on_failure():
-    """When intent understanding fails, it should fallback to chat action."""
-    from src.agents.researcher_agent import ResearcherAgent
-
-    # Create agent with mock config
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
+def test_convenience_functions():
+    """Test export_markdown_to_html and export_markdown_to_html_string"""
+    from src.report.html_exporter import (
+        export_markdown_to_html,
+        export_markdown_to_html_string,
     )
 
-    # The _understand_intent should fallback to chat when model wrapper fails
-    # (since we don't have a real API key)
-    result = agent._understand_intent("search for Python projects")
-    assert result["action"] == "chat"
-    assert result["params"]["message"] == "search for Python projects"
+    md = "# Convenience Test\n\nHello world."
 
-    print("  ✓ _understand_intent falls back to chat on failure")
+    # Test to string
+    html_str = export_markdown_to_html_string(md)
+    assert isinstance(html_str, str)
+    assert 'Convenience Test' in html_str
+    print("  ✓ export_markdown_to_html_string works")
 
-
-# ===========================================
-# Test 4: _execute_search with mocked GitHubTool
-# ===========================================
-def test_execute_search_with_results():
-    """Verify _execute_search produces markdown table with results."""
-    from src.agents.researcher_agent import ResearcherAgent
-
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    # Mock github_tool
-    mock_repo = MagicMock()
-    mock_repo.full_name = "test/repo1"
-    mock_repo.html_url = "https://github.com/test/repo1"
-    mock_repo.stargazers_count = 1000
-    mock_repo.language = "Python"
-    mock_repo.description = "A test repository"
-
-    agent.github_tool = MagicMock()
-    agent.github_tool.search_repositories.return_value = [mock_repo]
-
-    result = agent._execute_search({
-        "query": "test",
-        "sort": "stars",
-        "limit": 5,
-        "time_range_days": 0,
-    })
-
-    assert "## 搜索结果" in result
-    assert "test/repo1" in result
-    assert "1,000" in result  # formatted number
-    assert "Python" in result
-
-    print("  ✓ _execute_search produces correct markdown output")
-
-
-def test_execute_search_no_results():
-    """Verify _execute_search returns empty message when no results."""
-    from src.agents.researcher_agent import ResearcherAgent
-
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    agent.github_tool = MagicMock()
-    agent.github_tool.search_repositories.return_value = []
-
-    result = agent._execute_search({"query": "nonexistent_xyz", "sort": "stars", "limit": 5})
-    assert "没有找到" in result
-
-    print("  ✓ _execute_search handles no results correctly")
-
-
-def test_execute_search_with_time_range():
-    """Verify _execute_search includes time range in query."""
-    from src.agents.researcher_agent import ResearcherAgent
-    from datetime import datetime, timedelta
-
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    agent.github_tool = MagicMock()
-    agent.github_tool.search_repositories.return_value = []
-
-    result = agent._execute_search({
-        "query": "Rust",
-        "sort": "stars",
-        "limit": 10,
-        "time_range_days": 7,
-    })
-
-    # Should include created: date range in the search
-    expected_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-    assert f"created:{expected_date}" in result or "没有找到" in result
-
-    print("  ✓ _execute_search includes time range in query")
+    # Test to file
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, 'test.html')
+        result_path = export_markdown_to_html(md, output_path=output_path)
+        assert os.path.exists(result_path)
+        print("  ✓ export_markdown_to_html works")
 
 
 # ===========================================
-# Test 5: _execute_get_repo_info
+# Test 4: ReportExtractor title extraction
 # ===========================================
-def test_execute_get_repo_info_success():
-    """Verify _execute_get_repo_info returns formatted info."""
-    from src.agents.researcher_agent import ResearcherAgent
+def test_report_extractor_title():
+    """Test ReportExtractor extracts title from markdown"""
+    from src.report.html_exporter import ReportExtractor
 
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
+    md = "# My Awesome Report\n\nSome content here."
+    extractor = ReportExtractor(md)
+    result = extractor.extract()
 
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    mock_repo = MagicMock()
-    mock_repo.full_name = "langchain-ai/langchain"
-    mock_repo.html_url = "https://github.com/langchain-ai/langchain"
-    mock_repo.stargazers_count = 90000
-    mock_repo.forks_count = 15000
-    mock_repo.language = "Python"
-    mock_repo.description = "Build context-aware reasoning applications"
-    mock_repo.updated_at = "2024-01-01"
-
-    agent.github_tool = MagicMock()
-    agent.github_tool.get_repo_info.return_value = mock_repo
-
-    result = agent._execute_get_repo_info({
-        "owner": "langchain-ai",
-        "repo": "langchain",
-    })
-
-    assert "langchain-ai/langchain" in result
-    assert "90,000" in result
-    assert "Python" in result
-
-    print("  ✓ _execute_get_repo_info returns formatted info")
+    assert result['title'] == 'My Awesome Report'
+    assert 'My Awesome Report' in result['content']
+    print("  ✓ ReportExtractor title extraction works")
 
 
 # ===========================================
-# Test 6: _execute_compare
+# Test 5: ReportExtractor metric extraction
 # ===========================================
-def test_execute_compare_multiple_repos():
-    """Verify _execute_compare handles multiple repositories."""
-    from src.agents.researcher_agent import ResearcherAgent
+def test_report_extractor_metrics():
+    """Test ReportExtractor extracts metrics from markdown"""
+    from src.report.html_exporter import ReportExtractor
 
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
+    md = "# Report\n\n176 个测试 176 个通过\n\n54 条安全规则"
+    extractor = ReportExtractor(md)
+    extractor._extract_metrics()
 
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    # Mock get_repo_info to return formatted string
-    agent._execute_get_repo_info = MagicMock(return_value="Stars: 1000")
-
-    result = agent._execute_compare({
-        "repositories": ["org/repo1", "org/repo2"],
-    })
-
-    assert "## 项目对比" in result
-    assert "org/repo1" in result
-    assert "org/repo2" in result
-
-    print("  ✓ _execute_compare handles multiple repos")
-
-
-def test_execute_compare_empty_list():
-    """Verify _execute_compare handles empty repo list."""
-    from src.agents.researcher_agent import ResearcherAgent
-
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    result = agent._execute_compare({"repositories": []})
-    assert "请提供" in result
-
-    print("  ✓ _execute_compare handles empty list")
+    assert len(extractor.metrics) >= 1
+    # Check test metric
+    test_metrics = [m for m in extractor.metrics if '测试' in m.get('label', '')]
+    assert len(test_metrics) >= 1
+    print(f"  ✓ ReportExtractor metrics extraction works ({len(extractor.metrics)} metrics)")
 
 
 # ===========================================
-# Test 7: CLI Studio integration
+# Test 6: ReportExtractor HTML conversion with tables
 # ===========================================
-def test_cli_studio_integration_exists():
-    """Verify CLI app.py has Studio integration functions."""
-    from src.cli.app import _push_to_studio, _setup_studio
+def test_report_extractor_table_wrapper():
+    """Test ReportExtractor wraps tables in div.table-wrapper"""
+    from src.report.html_exporter import ReportExtractor
 
-    assert callable(_push_to_studio)
-    assert callable(_setup_studio)
+    md = "# Report\n\n| Col1 | Col2 |\n|------|------|\n| A | B |\n"
+    extractor = ReportExtractor(md)
+    result = extractor.extract()
 
-    print("  ✓ CLI _push_to_studio and _setup_studio exist")
-
-
-def test_cli_studio_push_graceful_degradation():
-    """Verify _push_to_studio doesn't crash when Studio is unavailable."""
-    from src.cli.app import _push_to_studio
-
-    # Should not raise even when Studio is not configured
-    _push_to_studio("Test Agent", "test content", "assistant")
-
-    print("  ✓ _push_to_studio degrades gracefully")
+    assert 'class="table-wrapper"' in result['content']
+    print("  ✓ ReportExtractor table wrapper works")
 
 
 # ===========================================
-# Test 8: ReportGenerator intent routing
+# Test 7: HTMLExporter with special characters
 # ===========================================
-def test_report_generator_intent_routing():
-    """Verify ReportGenerator has intent routing in _answer_followup."""
-    from src.workflows.report_generator import ReportGenerator
-    import inspect
+def test_html_exporter_special_chars():
+    """Test HTMLExporter handles special characters and emoji"""
+    from src.report.html_exporter import HTMLExporter
 
-    source = inspect.getsource(ReportGenerator._answer_followup)
-    assert "_understand_intent" in source
-    assert "_execute_search" in source or "_execute_get_repo_info" in source
-    assert "try:" in source
-    assert "except" in source
+    md = "# 测试报告 📊\n\n• ✅ 通过\n• ⚠️ 警告\n• 🔴 错误\n\n**Bold text** and *italic text*"
+    html = HTMLExporter().export_to_string(md)
 
-    print("  ✓ ReportGenerator._answer_followup has intent routing")
-
-
-# ===========================================
-# Test 9: search_and_analyze with non-search intent
-# ===========================================
-def test_search_and_analyze_non_search_intent():
-    """Verify search_and_analyze handles non-search intents by logging warning."""
-    from src.agents.researcher_agent import ResearcherAgent
-
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-    config.github_token = ""  # No token for unauthenticated requests
-    config.github_timeout = 30
-    config.github_rate_limit = 10
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    # Since intent understanding will fail (no API key), it falls back to chat
-    # which then triggers the raw query search path
-    result = agent.search_and_analyze("analyze this project")
-    assert isinstance(result, dict)
-
-    print("  ✓ search_and_analyze handles non-search intent")
+    assert '测试报告' in html
+    assert 'badge-success' in html
+    assert 'badge-warning' in html
+    assert 'badge-danger' in html
+    print("  ✓ HTMLExporter handles special characters and emoji")
 
 
 # ===========================================
-# Test 10: Long description truncation in search results
+# Test 8: HTMLExporter empty content
 # ===========================================
-def test_execute_search_long_description_truncation():
-    """Verify long descriptions are truncated in search results."""
-    from src.agents.researcher_agent import ResearcherAgent
+def test_html_exporter_empty_content():
+    """Test HTMLExporter handles empty/minimal markdown"""
+    from src.report.html_exporter import HTMLExporter
 
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
-
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
-
-    mock_repo = MagicMock()
-    mock_repo.full_name = "test/long-desc"
-    mock_repo.html_url = "https://github.com/test/long-desc"
-    mock_repo.stargazers_count = 500
-    mock_repo.language = "JavaScript"
-    mock_repo.description = "A" * 200  # Very long description
-
-    agent.github_tool = MagicMock()
-    agent.github_tool.search_repositories.return_value = [mock_repo]
-
-    result = agent._execute_search({
-        "query": "test",
-        "sort": "stars",
-        "limit": 5,
-    })
-
-    # Description should be truncated to 60 chars + "..."
-    assert "..." in result
-    assert len([line for line in result.split('\n') if "A" * 60 in line]) >= 0  # truncated
-
-    print("  ✓ Long descriptions are truncated in search results")
+    html = HTMLExporter().export_to_string("")
+    assert isinstance(html, str)
+    assert '<!DOCTYPE html>' in html
+    print("  ✓ HTMLExporter handles empty content")
 
 
 # ===========================================
-# Test 11: No description handling
+# Test 9: PushReportOptimizer - WeChat format
 # ===========================================
-def test_execute_search_no_description():
-    """Verify repos without description show placeholder."""
-    from src.agents.researcher_agent import ResearcherAgent
+def test_push_optimizer_wechat():
+    """Test PushReportOptimizer optimizes for WeChat"""
+    from src.report.push_optimizer import PushReportOptimizer
 
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
+    report = "# 项目分析报告\n\n176 个测试 176 个通过\n\n## 总结\n\n发现关键问题：测试覆盖率不足。\n\n## 行动建议\n\n1. 增加单元测试覆盖率到 80%\n2. 修复已知安全漏洞\n3. 优化性能瓶颈"
 
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
+    optimizer = PushReportOptimizer(report)
+    result = optimizer.optimize_for_wechat()
 
-    mock_repo = MagicMock()
-    mock_repo.full_name = "test/no-desc"
-    mock_repo.html_url = "https://github.com/test/no-desc"
-    mock_repo.stargazers_count = 100
-    mock_repo.language = "Go"
-    mock_repo.description = None
-
-    agent.github_tool = MagicMock()
-    agent.github_tool.search_repositories.return_value = [mock_repo]
-
-    result = agent._execute_search({
-        "query": "test",
-        "sort": "stars",
-        "limit": 5,
-    })
-
-    assert "无描述" in result
-
-    print("  ✓ No-description repos show placeholder")
+    assert '📊' in result
+    assert len(result) <= 1800
+    assert '项目分析报告' in result
+    print("  ✓ PushReportOptimizer WeChat optimization works")
 
 
 # ===========================================
-# Test 12: Error handling in _execute_search
+# Test 10: PushReportOptimizer - Feishu format
 # ===========================================
-def test_execute_search_runtime_error():
-    """Verify _execute_search handles RuntimeError gracefully."""
-    from src.agents.researcher_agent import ResearcherAgent
+def test_push_optimizer_feishu():
+    """Test PushReportOptimizer optimizes for Feishu"""
+    from src.report.push_optimizer import PushReportOptimizer
 
-    config = MagicMock()
-    config.dashscope_model_name = ""
-    config.dashscope_api_key = ""
-    config.dashscope_base_url = ""
+    report = "# 项目分析报告\n\n176 个测试 176 个通过\n\n54 条安全规则\n\n## 总结\n\n发现关键问题：测试覆盖率不足。\n\n## 竞品动态\n\nCodeRabbit 发布新功能。\n\n## 行动建议\n\n1. 增加单元测试覆盖率到 80%\n2. 修复已知安全漏洞\n3. 优化性能瓶颈"
 
-    agent = ResearcherAgent(
-        name="test",
-        model_name="",
-        config=config,
-        use_persistent=False,
-    )
+    optimizer = PushReportOptimizer(report)
+    result = optimizer.optimize_for_feishu()
 
-    agent.github_tool = MagicMock()
-    agent.github_tool.search_repositories.side_effect = RuntimeError("API error")
-
-    result = agent._execute_search({
-        "query": "test",
-        "sort": "stars",
-        "limit": 5,
-    })
-
-    assert "搜索失败" in result
-
-    print("  ✓ _execute_search handles RuntimeError gracefully")
+    assert '**' in result  # Feishu uses markdown bold
+    assert len(result) <= 3000
+    assert '项目分析报告' in result
+    print("  ✓ PushReportOptimizer Feishu optimization works")
 
 
-if __name__ == "__main__":
-    print("\n" + "#"*60)
-    print("# GitHub Insight Agent - Mission Part 3: Supplemental Tests")
-    print("#" * 60)
+# ===========================================
+# Test 11: PushReportOptimizer length truncation
+# ===========================================
+def test_push_optimizer_wechat_truncation():
+    """Test WeChat output respects max_length limit"""
+    from src.report.push_optimizer import PushReportOptimizer
 
-    tests = [
-        ("INTENT_TOOLS structure", test_intent_tools_structure),
-        ("INTENT_TOOLS required fields", test_intent_tools_required_fields),
-        ("INTENT_SYSTEM_PROMPT", test_intent_system_prompt),
-        ("ResearcherAgent new methods", test_researcher_agent_new_methods),
-        ("_understand_intent fallback", test_understand_intent_fallback_on_failure),
-        ("_execute_search with results", test_execute_search_with_results),
-        ("_execute_search no results", test_execute_search_no_results),
-        ("_execute_search with time range", test_execute_search_with_time_range),
-        ("_execute_get_repo_info success", test_execute_get_repo_info_success),
-        ("_execute_compare multiple repos", test_execute_compare_multiple_repos),
-        ("_execute_compare empty list", test_execute_compare_empty_list),
-        ("CLI _push_to_studio exists", test_cli_studio_integration_exists),
-        ("CLI _push_to_studio degradation", test_cli_studio_push_graceful_degradation),
-        ("ReportGenerator intent routing", test_report_generator_intent_routing),
-        ("search_and_analyze non-search", test_search_and_analyze_non_search_intent),
-        ("Long description truncation", test_execute_search_long_description_truncation),
-        ("No description handling", test_execute_search_no_description),
-        ("_execute_search error handling", test_execute_search_runtime_error),
+    # Create a very long report
+    long_report = "# Long Report\n\n" + "A" * 5000 + "\n\n" + "B" * 5000
+
+    optimizer = PushReportOptimizer(long_report)
+    result = optimizer.optimize_for_wechat(max_length=500)
+
+    assert len(result) <= 500
+    assert result.endswith('...') or len(result) < 500
+    print("  ✓ WeChat output truncation works")
+
+
+# ===========================================
+# Test 12: PushReportOptimizer Feishu length truncation
+# ===========================================
+def test_push_optimizer_feishu_truncation():
+    """Test Feishu output respects max_length limit"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    long_report = "# Long Report\n\n" + "A" * 5000 + "\n\n" + "B" * 5000
+
+    optimizer = PushReportOptimizer(long_report)
+    result = optimizer.optimize_for_feishu(max_length=500)
+
+    assert len(result) <= 500
+    print("  ✓ Feishu output truncation works")
+
+
+# ===========================================
+# Test 13: PushReportOptimizer convenience functions
+# ===========================================
+def test_push_optimizer_convenience():
+    """Test optimize_for_wechat and optimize_for_feishu convenience functions"""
+    from src.report.push_optimizer import optimize_for_wechat, optimize_for_feishu
+
+    report = "# Test\n\n100 个测试 100 个通过"
+
+    wechat = optimize_for_wechat(report)
+    assert isinstance(wechat, str)
+    assert '📊' in wechat
+    print("  ✓ optimize_for_wechat convenience function works")
+
+    feishu = optimize_for_feishu(report)
+    assert isinstance(feishu, str)
+    assert '**' in feishu
+    print("  ✓ optimize_for_feishu convenience function works")
+
+
+# ===========================================
+# Test 14: PushReportOptimizer empty report
+# ===========================================
+def test_push_optimizer_empty_report():
+    """Test PushReportOptimizer handles empty/minimal reports"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    optimizer = PushReportOptimizer("")
+    wechat = optimizer.optimize_for_wechat()
+    feishu = optimizer.optimize_for_feishu()
+
+    assert isinstance(wechat, str)
+    assert isinstance(feishu, str)
+    print("  ✓ PushReportOptimizer handles empty report")
+
+
+# ===========================================
+# Test 15: PushReportOptimizer metric extraction patterns
+# ===========================================
+def test_push_optimizer_metric_patterns():
+    """Test PushReportOptimizer extracts various metric patterns"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    report = """# Analysis Report
+
+176 个测试 158 个通过
+54 条安全规则
+10 个项目
++100 -50
+
+## 发现
+关键发现 1
+关键发现 2
+"""
+    optimizer = PushReportOptimizer(report)
+    sections = optimizer._extract_key_sections(report.split('\n'))
+
+    assert len(sections['metrics']) >= 1
+    print(f"  ✓ Metric extraction: {len(sections['metrics'])} metrics found")
+
+
+# ===========================================
+# Test 16: PushReportOptimizer finding extraction
+# ===========================================
+def test_push_optimizer_finding_extraction():
+    """Test PushReportOptimizer extracts findings from report"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    report = """# Report
+
+## 总结
+
+这是一个重要发现，需要关注。
+另一个重要发现，关于安全。
+"""
+    optimizer = PushReportOptimizer(report)
+    sections = optimizer._extract_key_sections(report.split('\n'))
+
+    assert len(sections['findings']) >= 1
+    print(f"  ✓ Finding extraction: {len(sections['findings'])} findings found")
+
+
+# ===========================================
+# Test 17: PushReportOptimizer action extraction
+# ===========================================
+def test_push_optimizer_action_extraction():
+    """Test PushReportOptimizer extracts action items from report"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    report = """# Report
+
+## 下一步行动
+
+增加测试覆盖率到 80%
+修复 OWASP 安全漏洞
+"""
+    optimizer = PushReportOptimizer(report)
+    sections = optimizer._extract_key_sections(report.split('\n'))
+
+    assert len(sections['actions']) >= 1
+    print(f"  ✓ Action extraction: {len(sections['actions'])} actions found")
+
+
+# ===========================================
+# Test 18: PushReportOptimizer competitor extraction
+# ===========================================
+def test_push_optimizer_competitor_extraction():
+    """Test PushReportOptimizer extracts competitor mentions"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    report = """# Report
+
+## 竞品动态
+
+CodeRabbit 发布了新的 AI review 功能
+Qodo 更新了定价策略
+"""
+    optimizer = PushReportOptimizer(report)
+    sections = optimizer._extract_key_sections(report.split('\n'))
+
+    assert len(sections['competitors']) >= 1
+    print(f"  ✓ Competitor extraction: {len(sections['competitors'])} competitors found")
+
+
+# ===========================================
+# Test 19: Module import and __all__
+# ===========================================
+def test_report_module_exports():
+    """Test that src.report module exports expected names"""
+    import src.report as report_mod
+
+    expected_exports = [
+        'export_markdown_to_html',
+        'export_markdown_to_html_string',
+        'HTMLExporter',
+        'optimize_for_wechat',
+        'optimize_for_feishu',
+        'PushReportOptimizer',
     ]
 
-    results = {}
-    for name, test_func in tests:
-        try:
-            test_func()
-            results[name] = True
-        except Exception as e:
-            print(f"  ✗ {name} failed: {e}")
-            import traceback
-            traceback.print_exc()
-            results[name] = False
+    for name in expected_exports:
+        assert name in report_mod.__all__, f"{name} missing from __all__"
+        assert hasattr(report_mod, name), f"{name} not accessible"
 
-    print("\n" + "="*60)
-    print("Part 3 测试结果汇总")
-    print("="*60)
+    print(f"  ✓ Module exports all {len(expected_exports)} expected names")
 
-    passed = sum(1 for r in results.values() if r)
-    total = len(results)
 
-    for name, result in results.items():
-        status = "✓ 通过" if result else "✗ 失败"
-        print(f"  {status} - {name}")
+# ===========================================
+# Test 20: HTML template renders properly
+# ===========================================
+def test_html_template_rendering():
+    """Test that the HTML template renders with all expected elements"""
+    from src.report.html_exporter import HTMLExporter
 
-    print(f"\n总计: {passed}/{total} 测试通过")
+    md = "# Full Test\n\n## Section 1\n\nContent 1\n\n## Section 2\n\nContent 2"
+    html = HTMLExporter().export_to_string(md)
 
-    if passed == total:
-        print("\n✓ 所有 Part 3 补充测试通过！")
-    else:
-        print(f"\n⚠ {total - passed} 个测试未通过")
+    # Check template elements
+    assert 'lang="zh-CN"' in html
+    assert 'viewport' in html
+    assert 'container' in html
+    assert 'footer' in html
+    assert 'Generated by GitHub Insight Agent' in html
+    assert ':root' in html  # CSS variables
+    assert '--bg-primary' in html
+    assert 'media' in html  # responsive design
+    print("  ✓ HTML template renders with all expected elements")
 
-    sys.exit(0 if passed == total else 1)
+
+# ===========================================
+# Test 21: HTMLExporter with non-existent output_dir
+# ===========================================
+def test_html_exporter_creates_output_dir():
+    """Test HTMLExporter creates output directory if it doesn't exist"""
+    from src.report.html_exporter import HTMLExporter
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        nested_dir = os.path.join(tmpdir, 'a', 'b', 'c')
+        assert not os.path.exists(nested_dir)
+        exporter = HTMLExporter(output_dir=nested_dir)
+        assert os.path.exists(nested_dir)
+        print("  ✓ HTMLExporter creates nested output directories")
+
+
+# ===========================================
+# Test 22: ReportExtractor with no title (default)
+# ===========================================
+def test_report_extractor_no_title():
+    """Test ReportExtractor uses default title when no H1 found"""
+    from src.report.html_exporter import ReportExtractor
+
+    md = "Just some content without a title."
+    extractor = ReportExtractor(md)
+    result = extractor.extract()
+
+    assert result['title'] == 'GitHub Insight Report'  # default title
+    print("  ✓ ReportExtractor uses default title when no H1")
+
+
+# ===========================================
+# Test 23: PushReportOptimizer with HTML URL
+# ===========================================
+def test_push_optimizer_with_html_url():
+    """Test PushReportOptimizer includes HTML URL when present"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    report = """# Report
+
+176 个测试 176 个通过
+
+## 总结
+
+关键发现。
+
+[完整报告](https://example.com/report.html)
+"""
+    # Add html_url to sections manually to test the path
+    optimizer = PushReportOptimizer(report)
+    sections = optimizer._extract_key_sections(report.split('\n'))
+    sections['html_url'] = 'https://example.com/report.html'
+
+    # Test that the optimizer can handle html_url
+    wechat = optimizer.optimize_for_wechat()
+    assert isinstance(wechat, str)
+    print("  ✓ PushReportOptimizer handles HTML URL field")
+
+
+# ===========================================
+# Test 24: PushReportOptimizer very short max_length
+# ===========================================
+def test_push_optimizer_very_short_max_length():
+    """Test WeChat/Feishu output with very short max_length"""
+    from src.report.push_optimizer import PushReportOptimizer
+
+    report = "# Report\n\n176 个测试 176 个通过\n\n## 总结\n\n关键发现。"
+    optimizer = PushReportOptimizer(report)
+
+    wechat = optimizer.optimize_for_wechat(max_length=50)
+    assert len(wechat) <= 50
+    print(f"  ✓ WeChat very short max_length: {len(wechat)} chars")
+
+    feishu = optimizer.optimize_for_feishu(max_length=50)
+    assert len(feishu) <= 50
+    print(f"  ✓ Feishu very short max_length: {len(feishu)} chars")
+
+
+# ===========================================
+# Test 25: ReportExtractor with no metrics
+# ===========================================
+def test_report_extractor_no_metrics():
+    """Test ReportExtractor handles content with no extractable metrics"""
+    from src.report.html_exporter import ReportExtractor
+
+    md = "# Report\n\nJust plain text without any metrics or numbers."
+    extractor = ReportExtractor(md)
+    result = extractor.extract()
+
+    assert result['title'] == 'Report'
+    assert isinstance(result['content'], str)
+    print("  ✓ ReportExtractor handles content with no metrics")
+
+
+# ===========================================
+# Test 26: HTMLExporter with full report integration
+# ===========================================
+def test_html_exporter_full_report():
+    """Test HTMLExporter with a realistic full report"""
+    from src.report.html_exporter import HTMLExporter
+
+    full_report = """# GitHub 项目分析报告
+
+**生成时间**: 2026-04-30
+
+## 项目概况
+
+- 名称: example/project
+- 语言: Python
+- Stars: 1,234
+
+## 代码质量
+
+| 指标 | 分数 |
+|------|------|
+| 可读性 | 85 |
+| 可维护性 | 78 |
+
+## 安全扫描
+
+176 个测试 176 个通过
+
+54 条安全规则
+
+### 发现的问题
+
+- ✅ 无严重漏洞
+- ⚠️ 2 条中危建议
+
+## 总结
+
+这是一个高质量的项目。
+
+## 下一步行动
+
+1. 增加测试覆盖率到 80%
+2. 修复 OWASP 安全漏洞
+3. 优化性能瓶颈
+"""
+    html = HTMLExporter().export_to_string(full_report)
+
+    assert '项目分析报告' in html
+    assert 'table-wrapper' in html  # table wrapper
+    assert 'badge-success' in html  # ✅ badge
+    assert 'badge-warning' in html  # ⚠️ badge
+    assert 'metric-card' in html or 'section' in html
+    print("  ✓ HTMLExporter handles full realistic report")

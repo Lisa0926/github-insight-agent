@@ -71,3 +71,6 @@ docs/MIGRATION_PLAN.md
 
 # Internal documentation (not for public repo)
 internal/
+
+# Generated reports
+reports/

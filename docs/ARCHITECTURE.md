@@ -1,7 +1,7 @@
 # GitHub Insight Agent - 架构文档
 
-**版本:** v2.1.0  
-**最后更新:** 2026-04-29
+**版本:** v2.2.0  
+**最后更新:** 2026-04-30
 
 ---
 
@@ -181,6 +181,7 @@ src/core/
 ├── agentscope_persistent_memory.py  # 持久化内存 (SQLite, 按 db_path 缓存)
 ├── conversation.py             # 会话管理
 ├── resilient_http.py           # 弹性 HTTP 客户端
+├── guardrails.py               # 安全护栏 (注入防护/输出过滤/熔断器/人工确认)
 ├── dashscope_wrapper.py        # DashScope 同步调用包装 (兼容 AgentScope ChatResponse)
 ├── studio_helper.py            # AgentScope Studio 自定义转发 (仅 set_studio_config)
 └── studio_integration.py       # AgentScope 官方 Studio 集成 (agent.print hook)
@@ -210,6 +211,15 @@ api_key = config.get_api_key("YOUR_MODEL_NAME_HERE")
 - 提供 `set_studio_config()` 为 agent 设置自定义 Studio 转发
 - 由 `_setup_studio()` 在 CLI 启动时调用
 
+#### Guardrails (`guardrails.py`)
+- **职责**: Agent 级安全护栏与治理
+- **功能**:
+  1. **Prompt 注入防护**: 15 种正则模式检测 (DAN/jailbreak/ignore instructions/act as/reveal prompt 等)，`sanitize_user_input()` 在 LLM 调用前拦截
+  2. **输出过滤**: 8 种敏感数据模式脱敏 (API Key/GitHub Token/AWS Key/DB URI/内部路径等)，`filter_sensitive_output()` 应用于所有 LLM 响应
+  3. **Agent 熔断器**: `AgentCircuitBreaker` 追踪步数(50)、时间(180s)、Token(5000)，超限自动中断
+  4. **人工确认**: 工具风险分级 (safe/moderate/dangerous)，高危操作 (create_issue/merge_pr/create_repo 等) 需人工审批
+- **集成点**: ResearcherAgent 意图理解 → CLI 输入路径 → ReportGenerator 执行管线 → Toolkit 工具响应
+
 ---
 
 ### 2.3 工具层 (src/tools/)
@@ -217,8 +227,7 @@ api_key = config.get_api_key("YOUR_MODEL_NAME_HERE")
 ```
 src/tools/
 ├── github_tool.py          # GitHub API 封装
-├── github_toolkit.py       # AgentScope Toolkit 集成
-├── tool_registry.py        # 工具注册表
+├── github_toolkit.py       # AgentScope Toolkit 集成 (含 audit_tool_call 装饰器)
 ├── pr_review_tool.py       # PR 审查工具
 ├── code_quality_tool.py    # 代码质量评分
 ├── owasp_security_rules.py # OWASP Top 10 检测 (53 条规则)
@@ -423,6 +432,13 @@ FEISHU_GROUP_ID=xxx
 - **OWASP Top 10 检测**: 53 条规则
 - **PR 审查**: 规则 + LLM 双重检测
 - **CI/CD**: flake8 + mypy + pip-audit
+
+### 5.3 Agent 安全护栏
+
+- **Prompt 注入防护**: 15 种模式在 LLM 调用前拦截注入攻击
+- **输出脱敏**: 自动脱敏 API Key、GitHub Token、AWS Key、DB URI 等 8 类敏感数据
+- **Agent 熔断器**: 最大步数 50 / 超时 180s / Token 预算 5000，防止无限循环和资源耗尽
+- **人工确认**: 高危工具 (写操作/外部影响) 需人工审批，安全工具 (只读操作) 自动放行
 
 ---
 

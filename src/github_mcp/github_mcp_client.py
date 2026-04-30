@@ -10,6 +10,7 @@ Features:
 
 import asyncio
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from agentscope.mcp import StdIOStatefulClient
@@ -17,6 +18,27 @@ from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# MCP server binary discovery
+_NPM_BIN = shutil.which("mcp-server-github") or os.path.join(
+    os.environ.get("NPM_CONFIG_PREFIX", "/usr/local/node"), "bin", "mcp-server-github"
+)
+_OFFICIAL_BIN = shutil.which("github-mcp-server")
+
+
+def _resolve_mcp_binary() -> str:
+    """Find an available GitHub MCP server binary.
+
+    Priority:
+    1. Official github-mcp-server (Go binary, needs 'stdio' subcommand)
+    2. @modelcontextprotocol/server-github (npm, runs in stdio mode directly)
+    3. User-provided path via GITHUB_MCP_SERVER_BIN env var
+    """
+    if _OFFICIAL_BIN:
+        return _OFFICIAL_BIN
+    if os.path.isfile(_NPM_BIN):
+        return _NPM_BIN
+    return ""
 
 
 class GitHubMCPClient(StdIOStatefulClient):
@@ -39,26 +61,35 @@ class GitHubMCPClient(StdIOStatefulClient):
         self._config = config or ConfigManager()
         self._token = github_token or self._config.github_token
 
-        # Use configured bin path or environment variable
+        # Resolve binary path with fallback strategy
         if bin_path is None:
             bin_path = os.environ.get(
                 "GITHUB_MCP_SERVER_BIN",
-                str(Path(__file__).parent.parent.parent / "bin" / "github-mcp-server")
+                _resolve_mcp_binary(),
             )
         self._bin_path = bin_path
+
+        # Detect which binary we're using
+        self._is_official = bool(bin_path and "github-mcp-server" in bin_path
+                                  and "mcp-server-github" not in bin_path)
 
         if not self._token:
             raise ValueError("GitHub Token is required for MCP client")
 
-        # Initialize StdIO client - requires stdio subcommand
+        # Initialize StdIO client
+        # Official Go binary needs 'stdio' subcommand; npm package runs in stdio mode directly
+        args = ["stdio"] if self._is_official else []
+
         super().__init__(
             name="github_mcp",
             command=bin_path,
-            args=["stdio"],  # Use stdio subcommand
+            args=args,
             env={"GITHUB_PERSONAL_ACCESS_TOKEN": self._token},
         )
 
-        logger.info(f"GitHub MCP Client initialized with bin: {bin_path}")
+        logger.info(
+            f"GitHub MCP Client initialized: bin={bin_path}, mode={'official(stdio)' if self._is_official else 'npm(stdio)'}"
+        )
 
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """
@@ -99,13 +130,6 @@ def create_github_mcp_client(
     if not token:
         logger.warning("No GitHub token configured, MCP client will not be initialized")
         return None
-
-    # Default bin path (use environment variable or relative path)
-    if bin_path is None:
-        bin_path = os.environ.get(
-            "GITHUB_MCP_SERVER_BIN",
-            str(Path(__file__).parent.parent.parent / "bin" / "github-mcp-server")
-        )
 
     try:
         client = GitHubMCPClient(

@@ -9,15 +9,71 @@ Features:
 - Supports streaming return and unified invocation interface
 """
 
+from functools import wraps
 from typing import Any, Dict, List, Optional
+import time
 from agentscope.tool import Toolkit, ToolResponse
 
 from src.core.config_manager import ConfigManager
+from src.core.guardrails import filter_sensitive_output
 from src.tools.github_tool import GitHubTool
 from src.github_mcp import create_github_mcp_client, register_github_mcp_tools
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def audit_tool_call(func):
+    """
+    Audit decorator for tool calls.
+
+    Records tool call input/output/duration/errors for analysis and optimization.
+    Logs every tool invocation with structured data.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        tool_name = func.__name__
+        start_time = time.time()
+
+        # Sanitize args for logging (avoid logging sensitive data like tokens)
+        safe_kwargs = {k: v for k, v in kwargs.items()
+                       if k.lower() not in ('token', 'secret', 'password', 'key', 'auth')}
+        input_summary = {
+            "tool": tool_name,
+            "args_count": len(args),
+            "kwargs": safe_kwargs,
+        }
+
+        try:
+            result = func(*args, **kwargs)
+            duration = time.time() - start_time
+
+            # Determine result size for logging
+            result_size = 0
+            if isinstance(result, ToolResponse):
+                result_size = len(str(result.content)) if result.content else 0
+            elif isinstance(result, str):
+                result_size = len(result)
+            elif isinstance(result, (list, dict)):
+                result_size = len(str(result))
+
+            logger.info(
+                f"[TOOL_AUDIT] tool={tool_name} status=success "
+                f"duration={duration:.3f}s output_size={result_size} "
+                f"input={input_summary}"
+            )
+            return result
+
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.warning(
+                f"[TOOL_AUDIT] tool={tool_name} status=error "
+                f"duration={duration:.3f}s error={str(e)} "
+                f"input={input_summary}"
+            )
+            raise
+
+    return wrapper
 
 
 def create_github_toolkit(  # noqa: C901
@@ -131,6 +187,8 @@ def create_github_toolkit(  # noqa: C901
             readme_content = github_tool.get_readme(owner, repo, ref=ref)
             if as_plain_text:
                 readme_content = github_tool.clean_readme_text(readme_content)
+            # Filter sensitive data from README content
+            readme_content = filter_sensitive_output(readme_content)
             return ToolResponse(content=[{"text": readme_content}])
 
         except (RuntimeError, ValueError) as e:

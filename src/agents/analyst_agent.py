@@ -15,13 +15,15 @@ Features:
 
 import json
 import re
+import ast
 from typing import Any, Dict, List, Optional, Union
 
 from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
+from src.core.guardrails import filter_sensitive_output
 from src.core.logger import get_logger
-from src.core.studio_helper import StudioHelper, set_global_studio_config, forward_to_studio
+from src.core.studio_helper import StudioHelper, set_global_studio_config
 from src.tools.github_tool import GitHubTool
 from src.tools.github_toolkit import get_github_toolkit
 from src.agents.base_agent import GiaAgentBase
@@ -362,13 +364,17 @@ class AnalystAgent(GiaAgentBase):
 
 1. **核心功能**：项目解决的核心问题、主要功能点（2-3 句详细描述，不要泛泛而谈）
 2. **技术栈**：使用的编程语言、框架、库、工具
-3. **解决的痛点**：目标用户是谁？解决什么实际问题？
-4. **独特价值**：与同类产品相比的差异化优势
-5. **成熟度评估**：从文档完整性、代码质量、社区活跃度判断（early/beta/stable/mature）
-6. **推荐意见**：是否值得使用？适合什么场景？有什么风险或不足？
-7. **竞品对比**：与同类主流项目的对比（如果有）
+3. **架构模式**：项目采用的架构模式（如 Monorepo/Microservices/CLI/SDK/Library/Framework/Plugin 等）
+4. **解决的痛点**：目标用户是谁？解决什么实际问题？
+5. **独特价值**：与同类产品相比的差异化优势
+6. **风险标记**：识别潜在风险（如：维护不活跃、许可证不明确、安全漏洞、社区不活跃、文档不足等）
+7. **适配度评分**：基于以上分析，给出一个 0.0-1.0 的适配度评分（suitability_score）
+8. **评分细分**：从功能完整度、代码质量、安全性、可维护性、社区活跃度五个维度评分（各 0.0-1.0）
+9. **成熟度评估**：从文档完整性、代码质量、社区活跃度判断（early/beta/stable/mature）
+10. **推荐意见**：是否值得使用？适合什么场景？有什么风险或不足？
+11. **竞品对比**：与同类主流项目的对比（如果有）
 
-请严格按照以下 JSON 格式输出（所有数组字段至少包含 1 个有效条目，不要留空）：
+请严格按照以下 JSON 格式输出（所有数组字段至少包含 1 个有效条目，不要留空；数值字段必须为 0.0-1.0 之间的浮点数）：
 {{
     "core_function": "详细的核心功能描述（2-3 句）",
     "tech_stack": {{
@@ -376,8 +382,18 @@ class AnalystAgent(GiaAgentBase):
         "frameworks": ["框架 1", "框架 2"],
         "key_dependencies": ["依赖 1", "依赖 2", "依赖 3"]
     }},
+    "architecture_pattern": "架构模式（如 Monorepo/Microservices/CLI/SDK/Library/Framework/Plugin）",
     "pain_points_solved": ["痛点 1", "痛点 2", "痛点 3"],
     "unique_value": "项目的独特价值和差异化优势",
+    "risk_flags": ["风险 1", "风险 2"],
+    "suitability_score": 0.85,
+    "score_breakdown": {{
+        "functionality": 0.8,
+        "code_quality": 0.7,
+        "security": 0.6,
+        "maintainability": 0.9,
+        "community": 0.8
+    }},
     "maturity_assessment": "early/beta/stable/mature",
     "recommendation": "推荐意见（recommend/consider/avoid）及理由（2-3 句）",
     "competitive_analysis": "与同类产品的对比分析（1-2 句）"
@@ -391,6 +407,9 @@ class AnalystAgent(GiaAgentBase):
 
             response = model_wrapper(messages=messages)
             content = self._extract_response_text(response)
+
+            # Filter sensitive data from LLM output
+            content = filter_sensitive_output(content)
 
             logger.info(f"LLM analysis completed via DashScopeChatModel, response length: {len(content)}")
 
@@ -406,6 +425,11 @@ class AnalystAgent(GiaAgentBase):
         """
         Parse JSON response returned by LLM
 
+        Handles:
+        - Standard JSON (double-quoted)
+        - Python-style dicts (single-quoted, common with qwen-max)
+        - Markdown code blocks (```json ... ```)
+
         Args:
             content: Content returned by LLM
 
@@ -414,7 +438,7 @@ class AnalystAgent(GiaAgentBase):
         """
         # Try to extract JSON content
         # Try to match ```json ... ``` block
-        json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
         if json_match:
             content = json_match.group(1)
         else:
@@ -426,13 +450,24 @@ class AnalystAgent(GiaAgentBase):
         try:
             analysis = json.loads(content)
             return analysis
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON: {e}")
-            # Return raw content
-            return {
-                "raw_response": content,
-                "parse_error": str(e),
-            }
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: Try ast.literal_eval for Python-style dicts (single-quoted keys/values)
+        # Common with qwen-max models
+        try:
+            result = ast.literal_eval(content)
+            if isinstance(result, dict):
+                logger.info("Parsed response as Python-style dict (single-quoted JSON)")
+                return result
+        except (ValueError, SyntaxError):
+            pass
+
+        logger.warning(f"Failed to parse JSON and Python-style dict, returning raw response")
+        return {
+            "raw_response": content,
+            "parse_error": "JSON decode failed and Python-style dict fallback also failed",
+        }
 
     def _try_read_config_file(self, owner: str, repo: str) -> Optional[str]:
         """

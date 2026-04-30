@@ -1,0 +1,145 @@
+# ============================================================
+# GIA Agent Role Boundaries & KPI Configuration
+# ADLC Phase 1: Intent Definition & Role Modeling
+# ============================================================
+# Version: 1.0.0
+# Last Updated: 2026-04-30
+# Owner: Product Manager / Project Lead
+# ============================================================
+
+product_vision:
+  positioning: "面向普通开发者的 GitHub 趋势发现与技术价值评估助手。不替代 IDE，不生成代码，只做信息过滤与决策辅助。"
+  value_proposition: "3 分钟内，从海量仓库中精准定位 1-3 个值得你关注/学习/引入的技术项目。"
+  north_star_metric: "有效洞察交付率 = (用户打开报告后产生正向反馈数) / (总报告触发数)"
+  target_persona:
+    - "1-5 年经验开发者"
+    - "技术选型负责人"
+    - "独立开发者 / 开源爱好者"
+  pain_points:
+    - "信息过载，无法快速筛选高价值项目"
+    - "文档质量参差不齐，难以评估技术健康度"
+    - "缺乏横向对比能力，选型决策耗时"
+
+agents:
+  researcher:
+    role: "开源情报侦察员"
+    goal: "准确、快速地获取目标项目的基础事实数据，完成信息初筛"
+    kpis:
+      - name: "意图解析准确率"
+        target: "≥ 95%"
+        measurement: "日志比对：用户输入 vs 实际执行的 Tool/Intent"
+      - name: "数据获取成功率"
+        target: "≥ 98%"
+        measurement: "(成功获取项目事实数 - 限流超时失败数) / 总请求数"
+      - name: "API 限流优雅降级"
+        target: "100% 拦截不崩溃"
+        measurement: "429 状态码触发重试/熔断且返回有效降级结果"
+    in_scope:
+      - "自然语言意图解析 (搜索/指定项目/对比)"
+      - "GitHub API / MCP 调用"
+      - "元数据提取 (Stars、语言、Readme、近期提交、Issue/PR 活跃度)"
+      - "基础去重、异常数据过滤 (如已归档、空仓库)"
+      - "趋势信号计算 (近 7/30 天 Star 增速、贡献者变化)"
+    out_of_scope:
+      - "技术架构评估 / 代码质量打分"
+      - "生成主观评价或推荐结论"
+      - "修改代码 / 创建 Issue / PR"
+      - "与用户直接进行开放式对话"
+    contracts:
+      input: "用户自然语言指令 / Cron 定时触发词"
+      output_schema: "List[ProjectFact]"
+      fields:
+        - "owner: str"
+        - "repo: str"
+        - "stars: int"
+        - "lang: str"
+        - "readme_snippet: str (max_length=2000)"
+        - "trend_score: float (0.0-1.0)"
+        - "last_commit_days: int"
+        - "tags: List[str]"
+
+  analyst:
+    role: "资深技术架构师"
+    goal: "基于事实数据，输出专业、客观、可行动的技术价值评估"
+    kpis:
+      - name: "分析客观性评分"
+        target: "≥ 4.5 / 5.0"
+        measurement: "LLM-as-Judge 抽检 (无过度承诺/幻觉/事实错误)"
+      - name: "幻觉/事实错误率"
+        target: "≤ 3%"
+        measurement: "人工抽检 + LLM 事实校验 (如 Star 数与 API 实际值偏差 >10% 即计为错误)"
+      - name: "技术栈识别覆盖率"
+        target: "≥ 90%"
+        measurement: "识别到的技术栈数量 / 实际项目使用的技术栈数量"
+    in_scope:
+      - "README / 核心文档深度解析"
+      - "技术栈识别与依赖健康度评估"
+      - "痛点与适用场景映射"
+      - "架构模式识别 (Monorepo / Microservices / CLI / SDK 等)"
+      - "质量/安全/维护性评分 (结合 OWASP 规则)"
+      - "生成结构化分析结论"
+    out_of_scope:
+      - "联网搜索 / 实时 API 调用 (完全依赖 Researcher 输入)"
+      - "代码执行 / 环境调试"
+      - "商业竞品定价分析 (非技术维度)"
+      - "用户闲聊或情感安抚"
+    contracts:
+      input: "List[ProjectFact] (Researcher 输出)"
+      output_schema: "ProjectAnalysisReport"
+      fields:
+        - "core_function: str"
+        - "tech_stack: List[str]"
+        - "architecture_pattern: str"
+        - "pain_points: List[str]"
+        - "suitability: str"
+        - "risk_flags: List[str]"
+        - "score_breakdown: Dict[str, float]"
+        - "suitability_score: float (0.0-1.0)"
+
+  pipeline:
+    role: "报告编排者与交付者"
+    goal: "整合多源信息，输出易读、结构化、符合产品调性的最终交付物"
+    kpis:
+      - name: "Time-to-Insight (TTI)"
+        target: "≤ 60s (浅层) / ≤ 120s (深度)"
+        measurement: "从用户输入到首屏报告渲染完成的时间戳差值"
+      - name: "任务成功率"
+        target: "≥ 98%"
+        measurement: "(成功完成数 - 限流/超时) / 总触发数 (含重试后)"
+      - name: "单次 Token 成本"
+        target: "≤ ¥0.12 (Qwen3.6) / ≤ $0.08 (GPT-4o)"
+        measurement: "(prompt_tokens + completion_tokens) × 单价"
+      - name: "移动端可读性"
+        target: "≥ 90% 完整展示"
+        measurement: "报告在微信/手机浏览器无横向滚动/截断比例"
+    in_scope:
+      - "多项目横向对比矩阵生成"
+      - "排版优化与多端适配 (CLI / HTML / 微信 / 飞书)"
+      - "关键指标提取与 Executive Summary 生成"
+      - "对话历史管理与上下文压缩"
+      - "导出/推送路由分发"
+    out_of_scope:
+      - "原始数据抓取 / 技术判断"
+      - "模型调用 (纯模板+规则引擎)"
+
+global_constraints:
+  cost_control:
+    max_tokens_per_session: 5000
+    hard_cost_limit_usd: 0.15
+    circuit_breaker:
+      max_steps: 50
+      max_time_seconds: 180
+      action: "interrupt_and_report"
+  data_integrity:
+    cross_agent_contract: "Pydantic models only. No raw Markdown/JSON passing."
+    validation_level: "strict"
+    missing_data_behavior: "return INSUFFICIENT_DATA flag, trigger upstream retry or degrade gracefully"
+
+kpi_tracking:
+  metrics_endpoint: "local: ~/.hermes/gia_metrics.jsonl"
+  report_frequency: "daily"
+  lld_judge:
+    enabled: true
+    model: "gpt-4o"  # or strongest available model
+    sample_size: 20
+    dimensions: ["accuracy", "completeness", "utility", "safety"]
