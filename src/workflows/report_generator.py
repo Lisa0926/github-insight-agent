@@ -13,6 +13,7 @@ Features:
 This is a linear workflow demonstrating the basic pattern of multi-Agent collaboration.
 """
 
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import time
@@ -779,6 +780,70 @@ No matching projects found. Please try:
 
         return "\n".join(context_parts)
 
+    def _resolve_repo_query(self, user_query: str) -> Optional[str]:
+        """
+        Resolve a repo-related followup question to real data.
+
+        Detects queries mentioning a specific repo (owner/repo or project name)
+        and fetches actual repo info from GitHub API.
+
+        Args:
+            user_query: User followup question
+
+        Returns:
+            Formatted repo info string, or None if not a repo query
+        """
+        # Pattern: owner/repo (may have Chinese chars after)
+        owner_repo_match = re.search(
+            r"([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+?)(?:[\s(（]|$|的|是|怎么|如何)",
+            user_query,
+        )
+        if owner_repo_match:
+            owner, repo = owner_repo_match.group(1), owner_repo_match.group(2)
+            try:
+                repo_info = self.analyst.github_tool.get_repo_info(owner, repo)
+                return (
+                    f"## Repository: {repo_info.full_name}\n"
+                    f"- Stars: {repo_info.stargazers_count:,}\n"
+                    f"- Forks: {repo_info.forks_count:,}\n"
+                    f"- Language: {repo_info.language or 'N/A'}\n"
+                    f"- Description: {repo_info.description or 'N/A'}\n"
+                    f"- URL: {repo_info.html_url}"
+                )
+            except Exception:
+                pass
+
+        # Pattern: project name followed by star/fork/language keywords
+        project_keywords = r"(?:star|stars|fork|forks|language|repo|description|issue|issues|commit|commits|pr|pull.?request|release|tag|branch|license|open.?source)"
+        name_match = re.search(
+            rf"(?:[\s(（]|^)([a-zA-Z][a-zA-Z0-9_.-]{{1,40}})的?[\s(（]?{project_keywords}",
+            user_query,
+            re.IGNORECASE,
+        )
+        if name_match:
+            project_name = name_match.group(1)
+            try:
+                repos = self.researcher.github_tool.search_repositories(
+                    query=project_name,
+                    sort="stars",
+                    order="desc",
+                    per_page=3,
+                )
+                if repos:
+                    top = repos[0]
+                    return (
+                        f"## Repository: {top.full_name} (matched from '{project_name}')\n"
+                        f"- Stars: {top.stargazers_count:,}\n"
+                        f"- Forks: {top.forks_count:,}\n"
+                        f"- Language: {top.language or 'N/A'}\n"
+                        f"- Description: {top.description or 'N/A'}\n"
+                        f"- URL: {top.html_url}"
+                    )
+            except Exception as e:
+                logger.warning(f"Repo search for followup failed: {e}")
+
+        return None
+
     def _answer_followup(
         self,
         user_query: str,
@@ -829,6 +894,11 @@ No matching projects found. Please try:
 
         # Fall back to LLM chat with context
         try:
+            # Try to resolve repo info for the followup question
+            repo_data = self._resolve_repo_query(user_query)
+            if repo_data:
+                context = f"{context}\n\n## 相关仓库数据\n{repo_data}"
+
             model_wrapper = self.analyst._get_model_wrapper()
 
             prompt = f"""你是一个专业的 GitHub 项目分析助手。请根据以下上下文回答用户的问题。

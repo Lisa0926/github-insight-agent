@@ -704,6 +704,102 @@ class ResearcherAgent(GiaAgentBase):
         self._add_to_memory("assistant", response_content)
         return response
 
+    def _resolve_repo_by_name(self, name: str) -> Optional[str]:
+        """
+        Resolve a project name (e.g. 'langchain', 'react') to repo info.
+
+        Tries exact owner/repo match first, then fuzzy search by name.
+
+        Args:
+            name: Project name or owner/repo string
+
+        Returns:
+            Formatted repo info string, or None if not found
+        """
+        # Check if it's owner/repo format
+        parts = name.split("/")
+        if len(parts) == 2:
+            owner, repo = parts[0].strip(), parts[1].strip()
+            try:
+                repo_info = self.github_tool.get_repo_info(owner, repo)
+                return (
+                    f"**{repo_info.full_name}**\n"
+                    f"- Stars: {repo_info.stargazers_count:,}\n"
+                    f"- Forks: {repo_info.forks_count:,}\n"
+                    f"- 语言: {repo_info.language or 'N/A'}\n"
+                    f"- 描述: {repo_info.description or 'N/A'}\n"
+                    f"- 地址: {repo_info.html_url}"
+                )
+            except Exception:
+                pass  # Fall through to fuzzy search
+
+        # Fuzzy search: try to find a repo matching the project name
+        try:
+            repos = self.github_tool.search_repositories(
+                query=name,
+                sort="stars",
+                order="desc",
+                per_page=5,
+            )
+            if repos:
+                top = repos[0]
+                return (
+                    f"**{top.full_name}** (根据名称「{name}」匹配)\n"
+                    f"- Stars: {top.stargazers_count:,}\n"
+                    f"- 语言: {top.language or 'N/A'}\n"
+                    f"- 描述: {top.description or 'N/A'}\n"
+                    f"- 地址: {top.html_url}"
+                )
+        except Exception as e:
+            logger.warning(f"Fuzzy repo search failed for '{name}': {e}")
+
+        return None
+
+    def _is_repo_lookup_query(self, query: str) -> Optional[str]:
+        """
+        Detect if the query looks like a direct repo lookup request.
+
+        Matches patterns like:
+        - "langchain/langchain" (owner/repo)
+        - "请分析 langchain" (action + project name)
+        - "langchain 的 star 数" (project name + question)
+        - "django star 多少" (project name + keyword)
+
+        Args:
+            query: Sanitized user query
+
+        Returns:
+            Extracted repo name string if detected, else None
+        """
+        query_lower = query.lower()
+
+        # Pattern: owner/repo (GitHub-style path)
+        owner_repo_match = re.search(
+            r"[\s/]*(?:[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+)", query
+        )
+        if owner_repo_match:
+            path = owner_repo_match.group(0).strip().strip("/")
+            # Validate it looks like owner/repo (no spaces, 2 parts)
+            parts = path.split("/")
+            if len(parts) == 2 and all(p.strip() for p in parts):
+                return path
+
+        # Pattern: project name followed by star/fork/lang/info questions
+        # Handle Chinese-style: no space between name and keyword (e.g. "langchain的star数")
+        star_keywords = r"的?[\s]*(?:star|stars|star数|fork|forks|语言|info|信息|介绍|分析|怎么样|如何|好吗|看看)"
+        name_match = re.search(
+            rf"(?:(?<=[\s(（])|^)([a-zA-Z][a-zA-Z0-9_.-]{{1,40}}){star_keywords}",
+            query_lower,
+        )
+        if name_match:
+            name = name_match.group(1)
+            # Filter out common words that aren't project names
+            common_words = {"not", "for", "the", "and", "with", "from", "have", "this", "that", "what", "how", "when", "where", "which", "your", "about", "请", "一个", "一些"}
+            if name.lower() not in common_words:
+                return name
+
+        return None
+
     def reply_to_message(self, user_query: str, analyst=None) -> str:
         """
         Respond to user query using LLM intent understanding.
@@ -724,7 +820,15 @@ class ResearcherAgent(GiaAgentBase):
             logger.warning(f"Input blocked: {e}")
             return f"⚠️ {e}"
 
-        # Step 1: Use LLM to understand intent
+        # Step 1: Check if this is a direct repo lookup (e.g. "langchain", "langchain/langchain")
+        repo_name = self._is_repo_lookup_query(user_query)
+        if repo_name:
+            repo_result = self._resolve_repo_by_name(repo_name)
+            if repo_result:
+                logger.info(f"Direct repo lookup matched: {repo_name}")
+                return repo_result
+
+        # Step 2: Use LLM to understand intent
         intent = self._understand_intent(user_query)
         action = intent["action"]
         params = intent["params"]
