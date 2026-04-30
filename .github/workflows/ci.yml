@@ -54,23 +54,12 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
-      - name: Run unit tests
+      - name: Run all tests (unit, integration, red team, edge cases, golden dataset, LLM judge, tracing, feedback)
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -m pytest tests/test_unit.py -v --tb=short
-
-      - name: Run integration tests (mock mode)
-        env:
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python -m pytest tests/test_integration.py -v --tb=short
-
-      - name: Run persistent storage tests
-        run: |
-          python -m pytest tests/test_persistent_storage.py -v --tb=short
+          python -m pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-fail-under=60
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4

@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Union
 from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
-from src.core.guardrails import filter_sensitive_output
+from src.core.guardrails import filter_sensitive_output, circuit_breaker_guard
 from src.core.logger import get_logger
 from src.core.studio_helper import StudioHelper, set_global_studio_config
 from src.tools.github_tool import GitHubTool
@@ -674,6 +674,7 @@ class AnalystAgent(GiaAgentBase):
         """
         return "资深技术架构师，擅长通过阅读 README 文档快速判断项目的技术价值。"
 
+    @circuit_breaker_guard
     @trace(name="analyst.reply")
     def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
         """

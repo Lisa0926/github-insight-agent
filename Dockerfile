@@ -35,9 +35,9 @@ RUN mkdir -p /app/data /app/reports /app/traces
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Health check (process-based: CLI is running)
+# Health check (validates application code and dependencies)
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=5s \
-    CMD python -c "import sys; sys.exit(0)" || exit 1
+    CMD python -c "from src.core.config_manager import ConfigManager; from src.agents.base_agent import GiaAgentBase; exit(0)" || exit 1
 
 # Entry point: interactive CLI
 ENTRYPOINT ["python", "run_cli.py"]

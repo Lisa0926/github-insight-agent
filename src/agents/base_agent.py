@@ -14,7 +14,10 @@ Note:
 - Uses runtime checks instead of ABC's abstract method checks
 """
 
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
+from pathlib import Path
+
+import yaml
 
 from agentscope.agent import AgentBase
 from agentscope.message import Msg
@@ -67,6 +70,9 @@ class GiaAgentBase(AgentBase):
         self.model_name = model_name or self.config.dashscope_model_name
         self.system_prompt = system_prompt or self._default_system_prompt()
 
+        # Inject role boundary constraints from role_kpi.yaml
+        self.system_prompt = self._inject_role_constraints(self.system_prompt)
+
         # Memory: reuse existing wrappers
         if use_persistent:
             from src.core.agentscope_persistent_memory import get_persistent_memory
@@ -81,6 +87,63 @@ class GiaAgentBase(AgentBase):
         self._model_wrapper = None
 
         logger.info(f"GiaAgentBase '{name}' initialized with model '{model_name}'")
+
+    # Cached role_kpi config (loaded once per process)
+    _role_kpi_cache: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def _load_role_kpi(cls) -> Optional[Dict[str, Any]]:
+        """Load role_kpi.yaml once and cache it."""
+        if cls._role_kpi_cache is not None:
+            return cls._role_kpi_cache
+
+        kpi_path = Path(__file__).parent.parent / "config" / "role_kpi.yaml"
+        try:
+            with open(kpi_path, "r", encoding="utf-8") as f:
+                cls._role_kpi_cache = yaml.safe_load(f)
+            logger.info(f"Loaded role_kpi.yaml from {kpi_path}")
+        except FileNotFoundError:
+            logger.warning(f"role_kpi.yaml not found at {kpi_path}, skipping role injection")
+        except Exception as e:
+            logger.warning(f"Failed to load role_kpi.yaml: {e}")
+        return cls._role_kpi_cache
+
+    def _inject_role_constraints(self, prompt: str) -> str:
+        """Inject role boundary constraints from role_kpi.yaml into system prompt."""
+        kpi = self._load_role_kpi()
+        if not kpi:
+            return prompt
+
+        # Map agent name to role key (researcher, analyst, pipeline)
+        role_key = self.name.lower()
+        agent_config = kpi.get("agents", {}).get(role_key)
+
+        # Fallback: try matching by class name
+        if not agent_config:
+            class_name = self.__class__.__name__.lower()
+            for key, cfg in kpi.get("agents", {}).items():
+                if key in class_name or class_name in key:
+                    agent_config = cfg
+                    break
+
+        if not agent_config:
+            logger.debug(f"No role_kpi config found for agent '{self.name}'")
+            return prompt
+
+        constraints = []
+        in_scope = agent_config.get("in_scope", [])
+        out_of_scope = agent_config.get("out_of_scope", [])
+
+        if in_scope:
+            constraints.append(f"## 职责范围（In-Scope）\n" + "\n".join(f"- {item}" for item in in_scope))
+        if out_of_scope:
+            constraints.append(f"## 禁止行为（Out-of-Scope）\n" + "\n".join(f"- {item}" for item in out_of_scope))
+
+        if constraints:
+            prompt += "\n\n" + "\n\n".join(constraints)
+            logger.debug(f"Injected role constraints for '{self.name}' ({len(in_scope)} in, {len(out_of_scope)} out)")
+
+        return prompt
 
     def _default_system_prompt(self) -> str:
         """Return the default system prompt"""

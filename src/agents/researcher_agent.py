@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
-from src.core.guardrails import sanitize_user_input, filter_sensitive_output
+from src.core.guardrails import sanitize_user_input, filter_sensitive_output, circuit_breaker_guard
 from src.core.logger import get_logger
 from src.core.studio_helper import StudioHelper, set_global_studio_config
 from src.tools.github_tool import GitHubTool
@@ -691,6 +691,7 @@ class ResearcherAgent(GiaAgentBase):
 
         return "\n".join(lines)
 
+    @circuit_breaker_guard
     @trace(name="researcher.reply")
     def reply(self, msg: Union[Msg, str], *args: Any, **kwargs: Any) -> Msg:
         """Respond to user message"""
