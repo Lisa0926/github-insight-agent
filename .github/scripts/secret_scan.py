@@ -85,6 +85,13 @@ SKIP_DIRS = {
     "dist", "build", "*.egg-info", ".mypy_cache", ".pytest_cache",
 }
 
+# Files to skip (test fixtures with fake secrets needed for testing)
+SKIP_FILES = {
+    "tests/test_red_team.py",
+    "tests/test_edge_cases.py",
+    "tests/test_security_and_api.py",
+}
+
 # File extensions to skip (binary files)
 SKIP_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
@@ -109,6 +116,10 @@ ALLOWED_PLACEHOLDERS = [
 
 def should_skip_file(filepath: str) -> bool:
     """Check if file should be skipped from scanning"""
+    # Skip known test files with fake secrets needed for testing
+    if filepath in SKIP_FILES:
+        return True
+
     path = Path(filepath)
 
     # Skip directories
