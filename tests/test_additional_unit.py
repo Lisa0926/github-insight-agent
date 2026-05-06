@@ -21,6 +21,7 @@ GitHub Insight Agent - 补充单元测试 (Part 1 Mission)
 import os
 import sys
 import json
+import pytest
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, MagicMock
