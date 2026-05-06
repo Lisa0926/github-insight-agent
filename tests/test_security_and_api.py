@@ -941,8 +941,6 @@ class TestOutputFiltering:
     def test_filter_github_token(self):
         """测试 GitHub Token 脱敏"""
         from src.core.guardrails import _SENSITIVE_PATTERNS
-        import re
-
         # Verify the GitHub token pattern exists and works
         github_pattern = None
         for pattern, replacement in _SENSITIVE_PATTERNS:

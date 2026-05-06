@@ -20,6 +20,7 @@ import pytest
 
 # Module-level mock functions (not bound to test class)
 
+
 def _good_scores_fn(messages=None):
     return {
         "content": json.dumps({
@@ -295,6 +296,7 @@ class TestMetricBaseCompatibility:
         solution = SolutionOutput(success=True, output="Test output", trajectory=[])
 
         import asyncio
+
         async def run():
             return await metric(solution, task_input="Test input")
         result = asyncio.get_event_loop().run_until_complete(run())

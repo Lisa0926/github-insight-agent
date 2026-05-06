@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for EventBus (P2-8: pipeline communication)."""
 
-import pytest
-
 from src.core.event_bus import (
     EventBus,
     EventEnvelope,

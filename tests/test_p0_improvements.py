@@ -4,7 +4,6 @@
 import pytest
 
 from src.core.kpi_tracker import (
-    KPIAlert,
     KPIAlertLevel,
     KPIAlertManager,
     KPITracker,

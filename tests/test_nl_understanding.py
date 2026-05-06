@@ -5,7 +5,6 @@ Tests for natural language understanding improvements:
 2. Tool-augmented followup handler (_resolve_repo_query)
 """
 
-import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch

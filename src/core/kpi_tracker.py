@@ -249,7 +249,10 @@ class KPIAlertManager:
             actual_value=value,
             target_value=target_value,
             severity=severity,
-            message=f"KPI violation [{agent}.{kpi_name}]: actual={value}, target={'<=' if target_max else '>='} {target_value}",
+            message=(
+                f"KPI violation [{agent}.{kpi_name}]: actual={value}, "
+                f"target={'<=' if target_max else '>='} {target_value}"
+            ),
         )
 
         self._violations.append(alert)

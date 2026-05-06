@@ -387,7 +387,7 @@ class AnalystAgent(GiaAgentBase):
         except (ValueError, SyntaxError):
             pass
 
-        logger.warning(f"Failed to parse JSON and Python-style dict, returning raw response")
+        logger.warning("Failed to parse JSON and Python-style dict, returning raw response")
         return {
             "raw_response": content,
             "parse_error": "JSON decode failed and Python-style dict fallback also failed",

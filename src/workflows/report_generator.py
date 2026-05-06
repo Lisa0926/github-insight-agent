@@ -34,6 +34,8 @@ from src.core.event_bus import (
     get_event_bus,
 )
 from src.core.feedback import FeedbackCollector, get_feedback_collector
+from src.core.feedback_trend import FeedbackTrendAnalyzer
+from src.core.llm_cache import get_llm_cache
 from src.agents.analyst_agent import AnalystAgent
 from src.agents.researcher_agent import ResearcherAgent
 
@@ -133,6 +135,9 @@ class ReportGenerator:
 
         # Feedback collector for user feedback loop (P2-9)
         self.feedback_collector: FeedbackCollector = get_feedback_collector()
+
+        # Feedback trend analyzer for north-star metric (P1)
+        self.feedback_trend: FeedbackTrendAnalyzer = FeedbackTrendAnalyzer()
 
         # Conversation manager (supports multi-turn conversation)
         self.conversation = ConversationManager(
@@ -448,7 +453,16 @@ class ReportGenerator:
         query: str,
         search_results: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Use LLM to decide analysis strategy based on search results."""
+        """Use LLM to decide analysis strategy based on search results (with caching)."""
+        # Try cache first
+        project_names = [r.get("full_name", "") for r in search_results]
+        cached = get_llm_cache().get(query, project_names)
+        if cached and cached.get("type") == "strategy":
+            logger.info(f"[LLM Cache] strategy hit for query='{query}'")
+            plan = cached.get("plan", {})
+            plan.setdefault("num_projects", len(search_results))
+            return plan
+
         try:
             model_wrapper = self.analyst._get_model_wrapper()
 
@@ -495,6 +509,13 @@ Respond with JSON ONLY:
                 plan.setdefault("focus_areas", [])
                 plan.setdefault("num_projects", len(search_results))
                 logger.info(f"[LLM Strategy] {plan['strategy']} (confidence={plan['confidence']:.0%})")
+
+                # Cache the result
+                get_llm_cache().put(query, project_names, {
+                    "type": "strategy",
+                    "plan": plan,
+                })
+
                 return plan
         except Exception as e:
             logger.warning(f"LLM strategy decision failed: {e}, falling back to heuristic")
@@ -571,7 +592,10 @@ Respond with JSON ONLY:
         )
 
         if needs_deepening:
-            logger.info(f"[Deepen] Insufficient detail for {project.get('full_name')}, analysis already complete — will note in report")
+            logger.info(
+                f"[Deepen] Insufficient detail for {project.get('full_name')}, "
+                "analysis already complete — will note in report"
+            )
             analysis["_deep_analysis"] = {
                 "status": "flagged",
                 "reason": "Initial analysis lacked depth for deep strategy",
@@ -638,7 +662,17 @@ Respond with JSON ONLY:
         analysis_results: List[Dict[str, Any]],
         plan: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        """Use LLM to decide if analysis results are sufficient."""
+        """Use LLM to decide if analysis results are sufficient (with caching)."""
+        # Build cache key from project names in results
+        project_names = [r.get("project", r.get("full_name", "")) for r in analysis_results]
+        cache_query = f"sufficiency|{plan.get('strategy', 'standard')}"
+        cached = get_llm_cache().get(cache_query, project_names)
+        if cached and cached.get("type") == "sufficiency":
+            logger.info(f"[LLM Cache] sufficiency hit for strategy={plan.get('strategy')}")
+            decision = cached.get("decision", {})
+            decision.setdefault("decision_method", "llm_cached")
+            return decision
+
         try:
             model_wrapper = self.analyst._get_model_wrapper()
 
@@ -661,7 +695,7 @@ Decide:
 - "needs_more": analyze more projects first
 
 Respond with JSON ONLY:
-{{"decision": "sufficient|needs_more", "reason": "..."}}"""
+{{"decision": "sufficient|needs_more", "reason": "..."}}"""  # noqa: E501
 
             messages = [
                 {"name": "system", "content": ReportGenerator._build_system_prompt(), "role": "system"},
@@ -677,11 +711,19 @@ Respond with JSON ONLY:
             if json_match:
                 decision = _json.loads(json_match.group())
                 needs_more = decision.get("decision") == "needs_more"
-                return {
+                result = {
                     "needs_more_analysis": needs_more,
                     "reason": decision.get("reason", ""),
                     "decision_method": "llm",
                 }
+
+                # Cache the result
+                get_llm_cache().put(cache_query, project_names, {
+                    "type": "sufficiency",
+                    "decision": result,
+                })
+
+                return result
         except Exception as e:
             logger.warning(f"LLM sufficiency check failed: {e}, falling back to heuristic")
         return None
@@ -1270,7 +1312,10 @@ No matching projects found. Please try:
                 pass
 
         # Pattern: project name followed by star/fork/language keywords
-        project_keywords = r"(?:star|stars|fork|forks|language|repo|description|issue|issues|commit|commits|pr|pull.?request|release|tag|branch|license|open.?source)"
+        project_keywords = (
+            r"(?:star|stars|fork|forks|language|repo|description|issue|issues"
+            r"|commit|commits|pr|pull.?request|release|tag|branch|license|open.?source)"
+        )
         name_match = re.search(
             rf"(?:[\s(（]|^)([a-zA-Z][a-zA-Z0-9_.-]{{1,40}})的?[\s(（]?{project_keywords}",
             user_query,
@@ -1367,7 +1412,9 @@ No matching projects found. Please try:
 请给出简洁、专业的回答。如果上下文中没有相关信息，请如实告知。"""
 
             messages = [
-                {"name": "system", "content": ReportGenerator._build_system_prompt("followup_system_prompt"), "role": "system"},
+                {"name": "system", "content":
+                 ReportGenerator._build_system_prompt("followup_system_prompt"),
+                 "role": "system"},
                 {"name": "user", "content": prompt, "role": "user"},
             ]
 
@@ -1464,6 +1511,24 @@ No matching projects found. Please try:
     def get_recent_feedback(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent feedback entries."""
         return self.feedback_collector.get_recent(limit=limit)
+
+    # ---- Feedback trend analysis (P1) ----
+
+    def get_north_star_metric(self) -> Dict[str, Any]:
+        """Return north-star metric: overall positive feedback rate."""
+        return self.feedback_trend.get_north_star_metric()
+
+    def get_feedback_trends(self, days: int = 30) -> List[Dict[str, Any]]:
+        """Return daily feedback trends for the last N days."""
+        return self.feedback_trend.get_daily_trends(days=days)
+
+    def get_trend_summary(self) -> str:
+        """Return human-readable trend summary."""
+        return self.feedback_trend.get_trend_summary()
+
+    def get_report_stats(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent feedback entries with derived metrics."""
+        return self.feedback_trend.get_report_stats(limit=limit)
 
     def get_results(self) -> Dict[str, Any]:
         """Get workflow execution results"""

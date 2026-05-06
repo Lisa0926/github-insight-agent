@@ -25,23 +25,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.types.schemas import GitHubRepo, GitHubSearchResult, ToolResponse
-from src.core.resilient_http import (
-    ResilientHTTPClient,
-    RateLimitError,
-    ServerError,
-    CircuitBreakerError,
-)
+from src.core.resilient_http import ResilientHTTPClient
 from src.tools.owasp_security_rules import (
     OWASPRuleEngine,
-    IssueSeverity,
-    IssueCategory,
-    SecurityComment,
 )
 from src.tools.pr_review_tool import PRReviewer, CodeChange, _parse_diff
 from src.cli.natural_language_parser import (
     NaturalLanguageParser,
     IntentType,
-    ParsedIntent,
 )
 from src.core.conversation import ConversationManager
 
@@ -521,7 +512,7 @@ def test_resilient_http_edge_cases():
         print_result("速率限制头解析", results["rate_limit_header"])
 
         # 6.5 Context manager
-        with ResilientHTTPClient() as client4:
+        with ResilientHTTPClient() as _:
             results["context_manager"] = True
         print_result("上下文管理器", results.get("context_manager", False))
 

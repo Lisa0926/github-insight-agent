@@ -3,8 +3,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from src.core.prompt_builder import get_system_prompt
 
 

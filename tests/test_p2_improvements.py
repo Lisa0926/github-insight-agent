@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for P2 improvements: Event Bus, LLM-driven planning, Feedback loop."""
 
-from unittest.mock import patch, MagicMock
-import tempfile
+from unittest.mock import MagicMock
 
 import pytest
 

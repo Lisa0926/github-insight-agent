@@ -9,10 +9,8 @@ Tests that malicious inputs are properly blocked or sanitized:
 4. Bypass attempts (encoding, obfuscation)
 """
 
-import os
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -355,7 +353,7 @@ class TestChainedAttacks:
 
     def test_staged_injection(self):
         """Multiple small injections that each alone might pass"""
-        from src.core.guardrails import sanitize_user_input, is_injection_attempt
+        from src.core.guardrails import sanitize_user_input
 
         # Each individual sentence might be safe
         sentence1 = sanitize_user_input("Hello, I am a user.")

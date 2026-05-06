@@ -128,7 +128,10 @@ def test_memory_compression():
     # 验证压缩后消息数不超过阈值 + 2
     assert pm.size() <= max_messages + 2, f"Compression failed: {pm.size()} > {max_messages + 2}"
     assert len(pm.compressed_summary) > 0, "Compression summary should not be empty"
-    assert "历史对话摘要" in pm.compressed_summary or "Historical Conversation Summary" in pm.compressed_summary, "Summary should contain expected header"
+    assert ("历史对话摘要" in pm.compressed_summary
+            or "Historical Conversation Summary" in pm.compressed_summary), (
+        "Summary should contain expected header"
+    )
 
     print(f"  ✓ 压缩成功：{pm.size()} 条消息，摘要 {len(pm.compressed_summary)} 字符")
     print("\n  ✓ 测试 3 通过")

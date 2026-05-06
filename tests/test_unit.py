@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.types.schemas import GitHubRepo, GitHubSearchResult, ToolResponse, AnalysisResult
-from src.tools.owasp_security_rules import OWASPRuleEngine, IssueSeverity, IssueCategory
+from src.tools.owasp_security_rules import OWASPRuleEngine
 from src.core.config_manager import ConfigManager
 
 
@@ -65,7 +65,6 @@ def test_tool_response():
     print_result("to_dict", results["to_dict"])
 
     # 1.4 to_json
-    import json
     resp = ToolResponse.ok(data={"a": 1})
     j = resp.to_json()
     results["to_json"] = isinstance(j, str) and "success" in j
@@ -134,8 +133,10 @@ def test_github_search_result():
     api_data = {
         "total_count": 2,
         "items": [
-            {"full_name": "a/b", "html_url": "http://x", "stargazers_count": 10, "language": "Python", "description": "", "topics": [], "updated_at": "2026-01-01"},
-            {"full_name": "c/d", "html_url": "http://y", "stargazers_count": 20, "language": "Go", "description": "", "topics": [], "updated_at": "2026-01-02"},
+            {"full_name": "a/b", "html_url": "http://x", "stargazers_count": 10,
+             "language": "Python", "description": "", "topics": [], "updated_at": "2026-01-01"},
+            {"full_name": "c/d", "html_url": "http://y", "stargazers_count": 20,
+             "language": "Go", "description": "", "topics": [], "updated_at": "2026-01-02"},
         ],
         "incomplete_results": False,
     }

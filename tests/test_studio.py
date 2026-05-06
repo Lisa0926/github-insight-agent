@@ -3,8 +3,6 @@
 
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 
 class TestStudioIntegration:
     """Test src/core/studio_integration.py"""
@@ -104,8 +102,6 @@ class TestStudioHelper:
         """Test set_global_studio_config creates helper."""
         from src.core.studio_helper import (
             set_global_studio_config,
-            get_studio_helper,
-            _studio_helper,
         )
         with patch("src.core.studio_helper.StudioHelper") as mock_helper_cls:
             mock_helper = MagicMock()

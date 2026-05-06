@@ -14,8 +14,6 @@ Tests scenarios that occur in production but are hard to reproduce:
 
 import os
 import sys
-import json
-import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -338,12 +336,12 @@ class TestCircuitBreakerIntegration:
 
     def test_circuit_breaker_elapsed_time(self):
         """Elapsed time should be measurable"""
-        import time
+        import time as _time
         from src.core.guardrails import AgentCircuitBreaker
 
         cb = AgentCircuitBreaker(max_steps=100, max_time_seconds=100, max_tokens=1000)
         cb.start_session()
-        time.sleep(0.05)
+        _time.sleep(0.05)
         assert cb.elapsed_time >= 0.05
 
     def test_circuit_breaker_state_dict(self):

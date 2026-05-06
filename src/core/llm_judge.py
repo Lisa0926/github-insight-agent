@@ -14,8 +14,8 @@ Architecture:
 """
 
 import json
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 from agentscope.evaluate import MetricBase, MetricResult, MetricType
 from agentscope.evaluate._solution import SolutionOutput

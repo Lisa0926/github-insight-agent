@@ -19,9 +19,9 @@ sys.path.insert(0, str(project_root))
 from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
-from src.core.guardrails import sanitize_user_input, requires_confirmation  # noqa: E402
+from src.core.guardrails import sanitize_user_input  # noqa: E402
 from src.core.feedback import get_feedback_collector, FeedbackSession  # noqa: E402
-import agentscope
+import agentscope  # noqa: E402
 from src.core.config_manager import ConfigManager  # noqa: E402
 from src.workflows.agent_pipeline import AgentPipeline  # noqa: E402
 

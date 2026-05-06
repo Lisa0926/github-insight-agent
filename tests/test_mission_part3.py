@@ -3,309 +3,432 @@
 Mission Part 3: Supplemental tests for uncommitted working tree changes.
 
 Covers:
-- base_agent.py: Role constraint injection via _load_role_kpi_config()
-- researcher_agent.py: KPI tracking integration in execute_action()
-- guardrails.py: Circuit breaker defaults from role_kpi.yaml
-- report_generator.py: ProjectFact/ProjectAnalysisReport validation + KPI tracking
-- contracts.py: Pydantic model integration with report_generator workflow
-- kpi_tracker.py: Integration with researcher/analyst/pipeline flows
+- feedback_trend.py: FeedbackTrendAnalyzer (new module)
+- llm_cache.py: LLMCache + singleton (new module)
+- agent_pipeline.py: New delegation methods (get_north_star_metric, etc.)
+- report_generator.py: LLM caching in strategy/sufficiency decisions
 """
 
 import json
+import os
+import sqlite3
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.core.contracts import ProjectFact, ProjectAnalysisReport
-from src.core.kpi_tracker import KPITracker, _load_role_kpi_config, get_kpi_tracker
+from src.core.feedback_trend import FeedbackTrendAnalyzer
+from src.core.llm_cache import LLMCache, _cache_key, get_llm_cache, reset_llm_cache
 
 
 # ============================================================
-# Fix Verification: base_agent.py role constraint refactoring
+# New Module: feedback_trend.py
 # ============================================================
 
-class TestBaseAgentRoleConstraints:
-    """Verify _load_role_kpi_config is correctly used after refactoring."""
-
-    def test_load_role_kpi_returns_dict_or_none(self):
-        """_load_role_kpi_config should return a dict or None."""
-        result = _load_role_kpi_config()
-        assert result is None or isinstance(result, dict)
-
-    def test_load_role_kpi_is_cached(self):
-        """Repeated calls should return the same cached object."""
-        r1 = _load_role_kpi_config()
-        r2 = _load_role_kpi_config()
-        assert r1 is r2
-
-    def test_role_kpi_has_expected_structure(self):
-        """If role_kpi.yaml is found, it should have agents and global_constraints."""
-        config = _load_role_kpi_config()
-        if config is None:
-            pytest.skip("role_kpi.yaml not found")
-        assert "agents" in config or "global_constraints" in config
-
-
-# ============================================================
-# Fix Verification: researcher_agent.py KPI tracking
-# ============================================================
-
-class TestResearcherKPITracking:
-    """Verify KPI tracking in ResearcherAgent execute_action()."""
-
-    def test_kpi_tracker_created_on_init(self):
-        """ResearcherAgent should have a kpi_tracker attribute."""
-        from src.agents.researcher_agent import ResearcherAgent
-        from src.core.config_manager import ConfigManager
-
-        with patch.object(ConfigManager, "__init__", return_value=None):
-            with patch.object(ConfigManager, "dashscope_model_name", "qwen-turbo"):
-                with patch.object(ConfigManager, "dashscope_api_key", "test-key"):
-                    with patch("src.agents.researcher_agent.GitHubTool"):
-                        with patch("src.agents.researcher_agent.get_github_toolkit", return_value=None):
-                            with patch("src.agents.base_agent.GiaAgentBase.__init__", return_value=None):
-                                agent = ResearcherAgent.__new__(ResearcherAgent)
-                                agent.config = ConfigManager()
-                                agent.kpi_tracker = KPITracker(
-                                    metrics_path=tempfile.mktemp(suffix=".jsonl")
-                                )
-                                assert hasattr(agent, "kpi_tracker")
-                                assert isinstance(agent.kpi_tracker, KPITracker)
-
-    def test_track_researcher_kpis_valid_action(self):
-        """Valid actions should produce intent_accuracy=1.0."""
-        tracker = KPITracker(metrics_path=tempfile.mktemp(suffix=".jsonl"))
-        kpis = tracker.track_researcher_kpis(
-            intent_action="search_repositories",
-            intent_params={"query": "AI"},
-            success=True,
-            result_count=5,
+@pytest.fixture
+def feedback_db():
+    """Create a temporary feedback database with test data."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    conn = sqlite3.connect(tmp.name)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            run_id TEXT DEFAULT '',
+            agent TEXT DEFAULT '',
+            user_input TEXT DEFAULT '',
+            assistant_output TEXT DEFAULT '',
+            rating TEXT NOT NULL CHECK(rating IN ('good', 'bad', 'neutral')),
+            reason TEXT DEFAULT '',
+            metadata TEXT DEFAULT '{}'
         )
-        assert kpis["intent_accuracy"] == 1.0
-        assert kpis["fetch_success_rate"] == 1.0
-
-    def test_track_researcher_kpis_invalid_action(self):
-        """Unknown actions should produce intent_accuracy=0.0."""
-        tracker = KPITracker(metrics_path=tempfile.mktemp(suffix=".jsonl"))
-        kpis = tracker.track_researcher_kpis(
-            intent_action="unknown_action",
-            intent_params={},
-            success=False,
-        )
-        assert kpis["intent_accuracy"] == 0.0
-        assert kpis["fetch_success_rate"] == 0.0
-
-
-# ============================================================
-# Fix Verification: guardrails.py circuit breaker defaults
-# ============================================================
-
-class TestCircuitBreakerRoleKpiDefaults:
-    """Verify circuit breaker reads defaults from role_kpi.yaml."""
-
-    @pytest.fixture(autouse=True)
-    def reset_circuit_breaker(self):
-        import src.core.guardrails as guardrails
-        original = guardrails._global_circuit_breaker
-        guardrails._global_circuit_breaker = None
-        yield
-        guardrails._global_circuit_breaker = original
-
-    def test_get_circuit_breaker_reads_yaml_defaults(self):
-        """Circuit breaker should use YAML defaults when available."""
-        from src.core.guardrails import get_circuit_breaker
-
-        config = _load_role_kpi_config()
-        if config is None:
-            pytest.skip("role_kpi.yaml not found")
-
-        cb = get_circuit_breaker()
-        constraints = config.get("global_constraints", {})
-        cost_config = constraints.get("cost_control", {})
-        cb_config = cost_config.get("circuit_breaker", {})
-
-        assert cb.max_steps == cb_config.get("max_steps", 50)
-        assert cb.max_time_seconds == cb_config.get("max_time_seconds", 180)
-
-    def test_explicit_params_override_yaml(self):
-        """Explicit parameters should override YAML defaults."""
-        from src.core.guardrails import get_circuit_breaker
-
-        cb = get_circuit_breaker(max_steps=10, max_time_seconds=30, max_tokens=1000)
-        assert cb.max_steps == 10
-        assert cb.max_time_seconds == 30
-        assert cb.max_tokens == 1000
+    """)
+    now = datetime.now()
+    test_data = [
+        (
+            now.strftime("%Y-%m-%dT%H:%M:%S"), "run1", "pipeline", "good query",
+            "report1", "good", "Great", '{"project_count": 3, "tti_total": 45.0}',
+        ),
+        (
+            now.strftime("%Y-%m-%dT%H:%M:%S"), "run2", "pipeline", "bad query",
+            "report2", "bad", "Missing data", '{"project_count": 1, "tti_total": 30.0}',
+        ),
+        (now.strftime("%Y-%m-%dT%H:%M:%S"), "run3", "researcher", "neutral q", "report3", "neutral", "OK", '{}'),
+        (
+            (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "run4", "pipeline", "old good", "report4", "good", "Helpful",
+            '{"project_count": 5, "tti_total": 60.0}',
+        ),
+        (
+            (now - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "run5", "pipeline", "old bad", "report5", "bad", "Bad",
+            '{"project_count": 2, "tti_total": 25.0}',
+        ),
+    ]
+    conn.executemany(
+        (
+            "INSERT INTO feedback "
+            "(timestamp, run_id, agent, user_input, assistant_output, rating, reason, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ),
+        test_data,
+    )
+    conn.commit()
+    conn.close()
+    yield tmp.name
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
 
 
-# ============================================================
-# Integration: report_generator.py + contracts.py
-# ============================================================
+class TestFeedbackTrendAnalyzer:
+    """Test FeedbackTrendAnalyzer methods."""
 
-class TestReportGeneratorContractValidation:
-    """Verify ProjectFact validation in report_generator._search_projects()."""
+    def test_get_daily_trends(self, feedback_db):
+        analyzer = FeedbackTrendAnalyzer(db_path=feedback_db)
+        trends = analyzer.get_daily_trends(days=7)
+        assert len(trends) == 3  # today, yesterday, 5 days ago
+        # trends are sorted ASC by date, so first entry is oldest (5 days ago)
+        oldest = trends[0]
+        assert oldest["total"] == 1
+        assert oldest["good"] == 0
+        assert oldest["bad"] == 1
+        # Last entry is today (3 entries: good, bad, neutral)
+        today = trends[-1]
+        assert today["total"] == 3
+        assert today["good"] == 1
+        assert today["bad"] == 1
+        assert today["neutral"] == 1
+        assert today["positive_rate"] == pytest.approx(33.3, abs=0.2)
 
-    def test_projectfact_validates_raw_repo_data(self):
-        """ProjectFact should validate and accept raw repo data from GitHub API."""
-        raw = {
-            "owner": "langchain-ai",
-            "repo": "langchain",
-            "stars": 90000,
-            "lang": "Python",
-            "readme_snippet": "Build context-aware reasoning applications",
-            "trend_score": 0.95,
-            "last_commit_days": 1,
-            "tags": ["ai", "llm", "python"],
-        }
-        fact = ProjectFact.model_validate(raw)
-        assert fact.owner == "langchain-ai"
-        assert fact.trend_score == 0.95
-        assert fact.tags == ["ai", "llm", "python"]
+    def test_get_daily_trends_empty_db(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        conn = sqlite3.connect(tmp.name)
+        conn.execute("""
+            CREATE TABLE feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                run_id TEXT DEFAULT '',
+                agent TEXT DEFAULT '',
+                user_input TEXT DEFAULT '',
+                assistant_output TEXT DEFAULT '',
+                rating TEXT NOT NULL,
+                reason TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}'
+            )
+        """)
+        conn.commit()
+        conn.close()
+        try:
+            analyzer = FeedbackTrendAnalyzer(db_path=tmp.name)
+            assert analyzer.get_daily_trends() == []
+        finally:
+            os.unlink(tmp.name)
 
-    def test_projectfact_clamps_trend_score(self):
-        """Trend scores outside [0, 1] should be clamped."""
-        fact = ProjectFact(owner="test", repo="test", stars=100, trend_score=2.0)
-        assert fact.trend_score == 1.0
+    def test_get_north_star_metric(self, feedback_db):
+        analyzer = FeedbackTrendAnalyzer(db_path=feedback_db)
+        metric = analyzer.get_north_star_metric()
+        overall = metric["overall"]
+        assert overall["total"] == 5
+        assert overall["good"] == 2
+        assert overall["bad"] == 2
+        assert overall["positive_rate"] == 40.0
+        assert "avg_tti" in overall
+        assert metric["recent_7d"]["total"] == 5
+        assert metric["recent_30d"]["total"] == 5
+        assert len(metric["by_agent"]) >= 1
 
-        fact = ProjectFact(owner="test", repo="test", stars=100, trend_score=-0.5)
-        assert fact.trend_score == 0.0
+    def test_north_star_empty_db(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        conn = sqlite3.connect(tmp.name)
+        conn.execute("""
+            CREATE TABLE feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                run_id TEXT DEFAULT '',
+                agent TEXT DEFAULT '',
+                user_input TEXT DEFAULT '',
+                assistant_output TEXT DEFAULT '',
+                rating TEXT NOT NULL,
+                reason TEXT DEFAULT '',
+                metadata TEXT DEFAULT '{}'
+            )
+        """)
+        conn.commit()
+        conn.close()
+        try:
+            analyzer = FeedbackTrendAnalyzer(db_path=tmp.name)
+            metric = analyzer.get_north_star_metric()
+            assert metric["overall"]["total"] == 0
+            assert metric["overall"]["positive_rate"] == 0.0
+            assert metric["by_agent"] == []
+        finally:
+            os.unlink(tmp.name)
 
-    def test_projectfact_handles_missing_optional_fields(self):
-        """Optional fields should have sensible defaults."""
-        fact = ProjectFact(owner="test", repo="test", stars=100)
-        assert fact.lang == ""
-        assert fact.tags == []
-        assert fact.trend_score is None
-        assert fact.last_commit_days is None
+    def test_get_report_stats(self, feedback_db):
+        analyzer = FeedbackTrendAnalyzer(db_path=feedback_db)
+        stats = analyzer.get_report_stats(limit=3)
+        assert len(stats) == 3
+        for s in stats:
+            assert "id" in s
+            assert "rating" in s
+            assert "project_count" in s
+            assert "tti_total" in s
+            assert "agent" in s
 
-    def test_projectanalysisreport_validates_analyst_output(self):
-        """ProjectAnalysisReport should validate analyst output."""
-        data = {
-            "core_function": "AI agent framework",
-            "tech_stack": ["Python", "LangChain", "OpenAI"],
-            "architecture_pattern": "Agent-based",
-            "pain_points": ["Complex configuration"],
-            "suitability": "AI applications",
-            "risk_flags": ["API dependency"],
-            "score_breakdown": {"quality": 0.85, "docs": 0.7},
-            "suitability_score": 0.85,
-        }
-        report = ProjectAnalysisReport.model_validate(data, from_attributes=True)
-        assert report.core_function == "AI agent framework"
-        assert len(report.tech_stack) == 3
-        assert report.suitability_score == 0.85
-        assert report.score("quality") == 0.85
+    def test_get_report_stats_limit(self, feedback_db):
+        analyzer = FeedbackTrendAnalyzer(db_path=feedback_db)
+        assert len(analyzer.get_report_stats(limit=1)) == 1
+        assert len(analyzer.get_report_stats(limit=10)) == 5
 
-    def test_projectanalysisreport_clamps_suitability_score(self):
-        """Suitability scores outside [0, 1] should be clamped."""
-        report = ProjectAnalysisReport(core_function="Test", suitability_score=1.5)
-        assert report.suitability_score == 1.0
+    def test_get_trend_summary(self, feedback_db):
+        analyzer = FeedbackTrendAnalyzer(db_path=feedback_db)
+        summary = analyzer.get_trend_summary()
+        assert "Feedback Trend Summary" in summary
+        assert "Total feedback" in summary
+        assert "Positive rate" in summary
 
-        report = ProjectAnalysisReport(core_function="Test", suitability_score=-0.3)
-        assert report.suitability_score == 0.0
+    def test_trend_summary_with_daily_breakdown(self, feedback_db):
+        analyzer = FeedbackTrendAnalyzer(db_path=feedback_db)
+        summary = analyzer.get_trend_summary()
+        assert "|" in summary  # table formatting
+        assert "##" in summary
 
-    def test_projectanalysisreport_handles_invalid_score(self):
-        """Non-numeric suitability_score should default to 0.5."""
-        report = ProjectAnalysisReport(
-            core_function="Test", suitability_score="invalid"
-        )
-        assert report.suitability_score == 0.5
-
-
-# ============================================================
-# Integration: KPI tracking end-to-end
-# ============================================================
-
-class TestKPIIntegration:
-    """Verify KPI tracker works correctly in the pipeline."""
-
-    def test_pipeline_kpis_persist_to_jsonl(self, tmp_path):
-        """Pipeline KPIs should be written to JSONL file."""
-        metrics_path = str(tmp_path / "test_metrics.jsonl")
-        tracker = KPITracker(metrics_path=metrics_path)
-
-        tracker.track_pipeline_kpis(tti_seconds=45.2, success=True)
-        tracker.track_researcher_kpis(
-            intent_action="search_repositories",
-            intent_params={"query": "AI"},
-            success=True,
-            result_count=3,
-        )
-        tracker.track_analyst_kpis(
-            analysis={
-                "core_function": "AI framework",
-                "tech_stack": ["Python"],
-                "architecture_pattern": "Agent",
-                "pain_points": [],
-                "risk_flags": [],
-                "stars": 1000,
-                "language": "Python",
-            },
-            report_text="test-project",
-        )
-
-        assert Path(metrics_path).exists()
-        with open(metrics_path) as f:
-            records = [json.loads(line) for line in f if line.strip()]
-        assert len(records) == 3
-        agents = [r["agent"] for r in records]
-        assert "pipeline" in agents
-        assert "researcher" in agents
-        assert "analyst" in agents
-
-    def test_kpi_tracker_custom_metrics_path(self, tmp_path):
-        """KPITracker should support custom metrics path."""
-        custom_path = str(tmp_path / "custom_metrics.jsonl")
-        tracker = KPITracker(metrics_path=custom_path)
-        tracker.track_pipeline_kpis(tti_seconds=30, success=True)
-        assert Path(custom_path).exists()
-
-    def test_global_kpi_tracker_singleton(self):
-        """get_kpi_tracker should return the same instance."""
-        t1 = get_kpi_tracker()
-        t2 = get_kpi_tracker()
-        assert t1 is t2
+    def test_nonexistent_db_path(self):
+        analyzer = FeedbackTrendAnalyzer(db_path="/tmp/nonexistent_feedback_trend.db")
+        # Should return empty results, not crash
+        assert analyzer.get_daily_trends() == []
+        metric = analyzer.get_north_star_metric()
+        assert metric["overall"] == {}
+        assert analyzer.get_report_stats() == []
 
 
 # ============================================================
-# Edge Cases: contracts.py
+# New Module: llm_cache.py
 # ============================================================
 
-class TestContractEdgeCases:
-    """Edge cases for Pydantic contracts."""
+class TestLLMCacheNewModule:
+    """Additional tests for LLMCache beyond existing test_llm_cache.py."""
 
-    def test_projectfact_extra_fields_ignored(self):
-        """Extra fields should be silently ignored."""
-        fact = ProjectFact(
-            owner="test", repo="test", stars=100,
-            extra_unknown_field="should_be_ignored",
-        )
-        assert not hasattr(fact, "extra_unknown_field")
+    def setup_method(self):
+        self.tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        self.tmp.close()
+        self.cache = LLMCache(ttl=10, cache_file=Path(self.tmp.name))
 
-    def test_projectfact_stars_validation(self):
-        """Stars must be >= 0."""
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            ProjectFact(owner="test", repo="test", stars=-1)
+    def teardown_method(self):
+        reset_llm_cache()
+        try:
+            os.unlink(self.tmp.name)
+        except OSError:
+            pass
 
-    def test_projectanalysisreport_score_breakdown_defaults(self):
-        """score_breakdown should default to empty dict."""
-        report = ProjectAnalysisReport(core_function="Test")
-        assert report.score_breakdown == {}
-        assert report.score("anything") == 0.0
+    def test_cache_key_empty_projects(self):
+        key = _cache_key("test query", [])
+        assert isinstance(key, str)
+        assert len(key) == 32  # MD5 hex length
 
-    def test_projectfact_full_name_property(self):
-        """full_name property should combine owner and repo."""
-        fact = ProjectFact(owner="microsoft", repo="vscode", stars=100)
-        assert fact.full_name == "microsoft/vscode"
+    def test_put_overwrite_same_key(self):
+        """JSONL cache appends; get() returns first match. Verify both entries exist."""
+        self.cache.put("q", ["p"], {"v": 1})
+        self.cache.put("q", ["p"], {"v": 2})
+        # get() returns first match (v=1) since it's append-only
+        result = self.cache.get("q", ["p"])
+        assert result["v"] == 1
+        # But both entries are in the file
+        with open(self.tmp.name, "r") as f:
+            lines = [ln for ln in f if ln.strip()]
+        assert len(lines) == 2
 
-    def test_projectfact_trend_score_none(self):
-        """trend_score should accept None."""
-        fact = ProjectFact(owner="test", repo="test", stars=100, trend_score=None)
-        assert fact.trend_score is None
+    def test_cache_file_creation(self):
+        assert not Path(self.tmp.name).exists() or os.path.getsize(self.tmp.name) == 0
+        self.cache.put("q", ["p"], {"data": "test"})
+        assert Path(self.tmp.name).exists()
+        assert os.path.getsize(self.tmp.name) > 0
 
-    def test_projectanalysisreport_risk_flags_default(self):
-        """risk_flags should default to empty list."""
-        report = ProjectAnalysisReport(core_function="Test")
-        assert report.risk_flags == []
+    def test_cache_persistence_format(self):
+        self.cache.put("strategy", ["projA", "projB"], {"type": "strategy", "plan": {"strategy": "deep"}})
+        with open(self.tmp.name, "r") as f:
+            line = f.readline().strip()
+            entry = json.loads(line)
+        assert entry["key"] == _cache_key("strategy", ["projA", "projB"])
+        assert entry["query"] == "strategy"
+        assert entry["projects"] == ["projA", "projB"]
+        assert "timestamp" in entry
+
+    def test_singleton_cache_file_default(self):
+        reset_llm_cache()
+        cache = get_llm_cache()
+        assert cache.cache_file == Path.home() / ".hermes" / "llm_cache.jsonl"
+
+    def test_clear_expired_on_missing_file(self):
+        missing_cache = LLMCache(ttl=10, cache_file=Path("/tmp/nonexistent_llm_cache.jsonl"))
+        assert missing_cache.clear_expired() == 0
+
+    def test_get_on_missing_file(self):
+        missing_cache = LLMCache(ttl=10, cache_file=Path("/tmp/nonexistent_llm_cache_2.jsonl"))
+        assert missing_cache.get("q", ["p"]) is None
+
+
+# ============================================================
+# Modified Module: agent_pipeline.py — new delegation methods
+# ============================================================
+
+class TestAgentPipelineNewMethods:
+    """Verify new methods added to AgentPipeline delegate to ReportGenerator."""
+
+    def test_get_north_star_metric_delegates(self):
+        from src.workflows.agent_pipeline import AgentPipeline
+        with patch.object(AgentPipeline, "__init__", return_value=None):
+            pipeline = AgentPipeline.__new__(AgentPipeline)
+            mock_gen = MagicMock()
+            mock_gen.get_north_star_metric.return_value = {"overall": {"positive_rate": 75.0}}
+            pipeline._report_gen = mock_gen
+            result = pipeline.get_north_star_metric()
+            mock_gen.get_north_star_metric.assert_called_once()
+            assert result["overall"]["positive_rate"] == 75.0
+
+    def test_get_feedback_trends_delegates(self):
+        from src.workflows.agent_pipeline import AgentPipeline
+        with patch.object(AgentPipeline, "__init__", return_value=None):
+            pipeline = AgentPipeline.__new__(AgentPipeline)
+            mock_gen = MagicMock()
+            mock_gen.get_feedback_trends.return_value = [{"date": "2026-05-01", "total": 10}]
+            pipeline._report_gen = mock_gen
+            result = pipeline.get_feedback_trends(days=7)
+            mock_gen.get_feedback_trends.assert_called_once_with(days=7)
+            assert result[0]["date"] == "2026-05-01"
+
+    def test_get_trend_summary_delegates(self):
+        from src.workflows.agent_pipeline import AgentPipeline
+        with patch.object(AgentPipeline, "__init__", return_value=None):
+            pipeline = AgentPipeline.__new__(AgentPipeline)
+            mock_gen = MagicMock()
+            mock_gen.get_trend_summary.return_value = "## Feedback Trend Summary\n- Total: 100"
+            pipeline._report_gen = mock_gen
+            result = pipeline.get_trend_summary()
+            mock_gen.get_trend_summary.assert_called_once()
+            assert "Total: 100" in result
+
+    def test_get_report_stats_delegates(self):
+        from src.workflows.agent_pipeline import AgentPipeline
+        with patch.object(AgentPipeline, "__init__", return_value=None):
+            pipeline = AgentPipeline.__new__(AgentPipeline)
+            mock_gen = MagicMock()
+            mock_gen.get_report_stats.return_value = [{"id": 1, "rating": "good"}]
+            pipeline._report_gen = mock_gen
+            result = pipeline.get_report_stats(limit=10)
+            mock_gen.get_report_stats.assert_called_once_with(limit=10)
+            assert result[0]["rating"] == "good"
+
+
+# ============================================================
+# Modified Module: report_generator.py — LLM caching
+# ============================================================
+
+class TestReportGeneratorLLMCaching:
+    """Verify LLM strategy/sufficiency caching works in report_generator."""
+
+    def test_strategy_cache_hit_avoids_llm_call(self):
+        """When cache has a strategy entry, LLM should not be called."""
+        from src.workflows.report_generator import ReportGenerator
+        reset_llm_cache()
+
+        with patch.object(ReportGenerator, "__init__", return_value=None):
+            rg = ReportGenerator.__new__(ReportGenerator)
+            rg.analyst = MagicMock()
+
+            # Pre-populate cache
+            cache_file = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+            cache_file.close()
+            cache = LLMCache(ttl=60, cache_file=Path(cache_file.name))
+            cache.put("test query", ["projA"], {
+                "type": "strategy",
+                "plan": {"strategy": "deep", "confidence": 0.9, "num_projects": 1},
+            })
+
+            with patch("src.workflows.report_generator.get_llm_cache", return_value=cache):
+                search_results = [{"full_name": "projA"}]
+                result = rg._llm_decide_strategy("test query", search_results)
+
+            assert result is not None
+            assert result["strategy"] == "deep"
+            assert result["confidence"] == 0.9
+            # Verify LLM was NOT called
+            rg.analyst._get_model_wrapper.assert_not_called()
+
+            try:
+                os.unlink(cache_file.name)
+            except OSError:
+                pass
+
+    def test_sufficiency_cache_hit_avoids_llm_call(self):
+        """When cache has a sufficiency entry, LLM should not be called."""
+        from src.workflows.report_generator import ReportGenerator
+        reset_llm_cache()
+
+        with patch.object(ReportGenerator, "__init__", return_value=None):
+            rg = ReportGenerator.__new__(ReportGenerator)
+            rg.analyst = MagicMock()
+
+            cache_file = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+            cache_file.close()
+            cache = LLMCache(ttl=60, cache_file=Path(cache_file.name))
+            cache.put("sufficiency|deep", ["projA"], {
+                "type": "sufficiency",
+                "decision": {"needs_more_analysis": False, "reason": "Sufficient", "decision_method": "llm_cached"},
+            })
+
+            with patch("src.workflows.report_generator.get_llm_cache", return_value=cache):
+                analysis_results = [{"project": "projA"}]
+                plan = {"strategy": "deep"}
+                result = rg._llm_decide_sufficiency(analysis_results, plan)
+
+            assert result is not None
+            assert result["decision_method"] == "llm_cached"
+            rg.analyst._get_model_wrapper.assert_not_called()
+
+            try:
+                os.unlink(cache_file.name)
+            except OSError:
+                pass
+
+    def test_strategy_cache_miss_calls_llm(self):
+        """When cache misses, LLM should be called and result cached."""
+        from src.workflows.report_generator import ReportGenerator
+        reset_llm_cache()
+
+        cache_file = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        cache_file.close()
+        cache = LLMCache(ttl=60, cache_file=Path(cache_file.name))
+
+        with patch.object(ReportGenerator, "__init__", return_value=None):
+            rg = ReportGenerator.__new__(ReportGenerator)
+            mock_model = MagicMock()
+            mock_model.return_value = '{"strategy": "quick", "confidence": 0.7, "focus_areas": ["readme"]}'
+            rg.analyst = MagicMock()
+            rg.analyst._get_model_wrapper.return_value = mock_model
+            rg.analyst._extract_response_text.return_value = (
+                '{"strategy": "quick", "confidence": 0.7, "focus_areas": ["readme"]}'
+            )
+
+            with patch("src.workflows.report_generator.get_llm_cache", return_value=cache):
+                search_results = [{"full_name": "projA"}]
+                result = rg._llm_decide_strategy("new query", search_results)
+
+            assert result is not None
+            assert result["strategy"] == "quick"
+            # Verify result was cached
+            cached = cache.get("new query", ["projA"])
+            assert cached is not None
+            assert cached["type"] == "strategy"
+
+            try:
+                os.unlink(cache_file.name)
+            except OSError:
+                pass

@@ -11,7 +11,6 @@ Features:
 import asyncio
 import os
 import shutil
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from agentscope.mcp import StdIOStatefulClient
 from src.core.config_manager import ConfigManager
@@ -70,8 +69,10 @@ class GitHubMCPClient(StdIOStatefulClient):
         self._bin_path = bin_path
 
         # Detect which binary we're using
-        self._is_official = bool(bin_path and "github-mcp-server" in bin_path
-                                  and "mcp-server-github" not in bin_path)
+        self._is_official = bool(
+            bin_path and "github-mcp-server" in bin_path
+            and "mcp-server-github" not in bin_path
+        )
 
         if not self._token:
             raise ValueError("GitHub Token is required for MCP client")

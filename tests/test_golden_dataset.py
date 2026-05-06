@@ -14,7 +14,6 @@ Uses mocked API responses as the "golden" input, validates output contracts.
 
 import os
 import sys
-import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -198,7 +197,6 @@ class TestSchemaCorrectness:
 
     def test_score_breakdown_schema(self):
         """ScoreBreakdown should validate all scores 0.0-1.0"""
-        from pydantic import ValidationError
         from src.types.schemas import ScoreBreakdown
 
         scores = ScoreBreakdown(
@@ -425,7 +423,7 @@ class TestEndToEndPipeline:
         """Create a mock HTTP client that returns golden data"""
         import base64
 
-        client = MagicMock()
+        MagicMock()
 
         def mock_request(method, url, *args, **kwargs):
             resp = MagicMock()

@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # ===========================================
 # Test 1: DashScopeProvider model fallback fix
 # ===========================================
+
+
 def test_ds_provider_model_env_fallback():
     """Verify that model env var fallback works (bug fix for line 33 overwrite)"""
     from src.llm.providers.dashscope_provider import DashScopeProvider
@@ -56,7 +58,7 @@ def test_ds_provider_model_env_fallback():
 def test_persistent_memory_singleton_per_db_path():
     """Verify that different db_paths get different instances"""
     from src.core.agentscope_persistent_memory import (
-        get_persistent_memory, _persistent_memory_cache
+        get_persistent_memory,
     )
 
     # Clear cache first
@@ -395,7 +397,7 @@ def test_tool_response_complex_data():
 # ===========================================
 def test_pr_review_empty_diff():
     """Test PR reviewer with empty diff"""
-    from src.tools.pr_review_tool import PRReviewer, _parse_diff
+    from src.tools.pr_review_tool import _parse_diff
 
     changes = _parse_diff("")
     assert changes == [] or len(changes) == 0

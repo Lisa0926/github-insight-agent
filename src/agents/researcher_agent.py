@@ -786,7 +786,11 @@ class ResearcherAgent(GiaAgentBase):
         if name_match:
             name = name_match.group(1)
             # Filter out common words that aren't project names
-            common_words = {"not", "for", "the", "and", "with", "from", "have", "this", "that", "what", "how", "when", "where", "which", "your", "about", "请", "一个", "一些"}
+            common_words = {
+                "not", "for", "the", "and", "with", "from", "have", "this",
+                "that", "what", "how", "when", "where", "which", "your",
+                "about", "请", "一个", "一些",
+            }
             if name.lower() not in common_words:
                 return name
 
