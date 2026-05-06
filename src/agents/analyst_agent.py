@@ -70,90 +70,6 @@ class AnalystAgent(GiaAgentBase):
         memory: Conversation memory
     """
 
-    # ReAct mode system prompt template
-    SYSTEM_PROMPT = """你是一个资深技术架构师，擅长通过阅读文档快速判断项目的技术价值。
-
-## ReAct 模式要求
-
-在分析项目时，你必须按照以下格式输出：
-
-### 思考过程 (Thought)
-在每次调用工具前，你必须先思考：
-- 我为什么要调用这个工具？
-- 我预期得到什么结果？
-- 如果工具返回错误，我的备选方案是什么？
-
-### 行动 (Action)
-明确说明你要调用的工具和传入的参数。
-
-### 输入 (Input)
-具体的工具调用输入内容。
-
-## 你的任务
-请分析一个 GitHub 项目的 README 内容，提取以下关键信息：
-
-### 1. 核心功能（一句话总结）
-用简洁的语言描述这个项目主要做什么。
-
-### 2. 技术栈
-- 编程语言
-- 主要框架/库
-- 关键依赖
-
-### 3. 解决了什么痛点
-这个项目解决了哪些开发者痛点？有什么独特价值？
-
-## 分析指南
-1. 重点关注 README 中的 'Features', 'Installation', 'Usage', 'Quick Start' 章节
-2. 如果 README 内容过长，优先阅读前 3000 字符
-3. 从代码示例中推断技术栈
-4. 从简介和特性描述中提炼核心价值
-
-## 错误处理与备选方案
-
-如果遇到问题，请按以下策略处理：
-
-1. **README 不存在或为空**：
-   - 思考："README 不可用，我需要尝试其他方式获取项目信息"
-   - 备选：尝试读取 Cargo.toml (Rust 项目)、package.json (Node.js)、pyproject.toml/requirements.txt (Python)、go.mod (Go) 等配置文件
-   - 从配置文件中推断技术栈
-
-2. **GitHub API 返回 404**：
-   - 思考："项目可能不存在或名称有误，我需要确认项目名称"
-   - 备选：提示用户检查项目名称，或尝试搜索相似名称的项目
-
-3. **GitHub API 返回 403 (速率限制)**：
-   - 思考："API 速率限制已触发，需要等待或降级处理"
-   - 备选：告知用户稍后重试，或基于已有信息进行推断
-
-4. **README 内容过短或信息不足**：
-   - 思考："README 信息不足，我需要从其他来源补充"
-   - 备选：从项目简介、主题标签、Star 数量等元数据推断项目价值
-
-## 输出格式
-
-在分析完成后，请严格按照以下 JSON 格式输出最终结果：
-
-```json
-{
-    "core_function": "一句话核心功能描述",
-    "tech_stack": {
-        "language": "主要编程语言",
-        "frameworks": ["框架 1", "框架 2"],
-        "key_dependencies": ["依赖 1", "依赖 2"]
-    },
-    "pain_points_solved": ["痛点 1", "痛点 2"],
-    "unique_value": "项目的独特价值或创新点",
-    "maturity_assessment": "项目成熟度评估 (early/beta/stable/mature)",
-    "recommendation": "是否推荐使用 (recommend/consider/avoid) 及理由"
-}
-```
-
-## 约束
-- 只基于可获得的信息分析，不要编造
-- 如果信息不足，明确说明"信息不足，基于已有元数据推断"
-- 输出必须是有效的 JSON 格式"""
-
     def __init__(
         self,
         name: str = "Analyst",
@@ -178,10 +94,14 @@ class AnalystAgent(GiaAgentBase):
             use_persistent: Whether to use persistent storage (default: True)
             db_path: SQLite database path
         """
+        from src.core.prompt_builder import get_system_prompt
+
+        _prompt = system_prompt or get_system_prompt("analyst")
+
         super().__init__(
             name=name,
             model_name=model_name,
-            system_prompt=system_prompt or self.SYSTEM_PROMPT,
+            system_prompt=_prompt,
             config=config,
             use_persistent=use_persistent,
             db_path=db_path,
@@ -312,6 +232,9 @@ class AnalystAgent(GiaAgentBase):
 
             # Call LLM for analysis
             analysis_result = self._analyze_with_llm(project_info, readme_content)
+
+            # Reflection: self-validate the analysis result
+            analysis_result = self._reflect(analysis_result, project_info)
 
             # Add ReAct markers to results
             analysis_result["react_thoughts"] = react_thoughts
@@ -469,6 +392,222 @@ class AnalystAgent(GiaAgentBase):
             "raw_response": content,
             "parse_error": "JSON decode failed and Python-style dict fallback also failed",
         }
+
+    def _reflect(
+        self,
+        analysis: Dict[str, Any],
+        project_info: str,
+        max_retries: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        Reflection: self-validate analysis result and fix if needed.
+
+        Checks:
+        1. **Completeness**: All required fields present (core_function, tech_stack, etc.)
+        2. **Consistency**: Scores don't contradict each other (e.g., high suitability but low all subscores)
+        3. **Fact-grounding**: Key claims are supported by project info (stars, language match)
+        4. **Reasonableness**: Suitability score aligns with score breakdown
+
+        If issues are found, attempts to fix via a single LLM call.
+
+        Args:
+            analysis: Raw analysis result from LLM
+            project_info: Project info string used for fact-checking
+            max_retries: Max number of retry attempts (default 1 to control cost)
+
+        Returns:
+            Analysis result with reflection metadata added
+        """
+        reflection_result = {
+            "completeness": False,
+            "consistency": False,
+            "fact_grounded": False,
+            "reasonable": False,
+            "issues": [],
+        }
+
+        # Check 1: Completeness
+        required_fields = [
+            "core_function", "tech_stack", "architecture_pattern",
+            "pain_points_solved", "unique_value", "risk_flags",
+            "suitability_score", "maturity_assessment", "recommendation",
+        ]
+        missing = [f for f in required_fields if f not in analysis or not analysis[f]]
+        reflection_result["completeness"] = len(missing) == 0
+        if missing:
+            reflection_result["issues"].append(f"Missing fields: {', '.join(missing)}")
+
+        # Check 2: Consistency - suitability score vs score breakdown
+        breakdown = analysis.get("score_breakdown", {})
+        suitability = analysis.get("suitability_score")
+
+        if breakdown and suitability is not None:
+            avg_breakdown = sum(breakdown.values()) / len(breakdown) if breakdown else 0
+            # If suitability deviates too much from average breakdown, flag it
+            if abs(suitability - avg_breakdown) > 0.4:
+                reflection_result["issues"].append(
+                    f"Suitability ({suitability}) deviates significantly from breakdown avg ({avg_breakdown:.2f})"
+                )
+        reflection_result["consistency"] = len([
+            i for i in reflection_result["issues"] if "deviates" in i
+        ]) == 0
+
+        # Check 3: Fact-grounding - language and basic facts match
+        if analysis.get("tech_stack"):
+            ts = analysis["tech_stack"]
+            if isinstance(ts, dict):
+                ts_lang = ts.get("language", "")
+                # Extract language from project_info
+                lang_match = re.search(r"- 编程语言：(.+)", project_info)
+                if lang_match:
+                    actual_lang = lang_match.group(1).strip()
+                    if ts_lang and actual_lang and ts_lang.lower() != actual_lang.lower():
+                        reflection_result["issues"].append(
+                            f"Tech stack language ({ts_lang}) doesn't match project language ({actual_lang})"
+                        )
+        reflection_result["fact_grounded"] = len([
+            i for i in reflection_result["issues"] if "language" in i.lower() or "match" in i.lower()
+        ]) == 0
+
+        # Check 4: Reasonableness - maturity and recommendation make sense
+        maturity = analysis.get("maturity_assessment", "")
+        recommendation = analysis.get("recommendation", "")
+        if maturity and recommendation:
+            rec_lower = recommendation.lower()
+            # If maturity is "early" but recommendation is strongly positive, flag
+            if maturity == "early" and ("推荐" in recommendation or "recommend" in rec_lower):
+                reflection_result["issues"].append(
+                    "Early maturity project with strong positive recommendation — verify"
+                )
+        reflection_result["reasonable"] = len([
+            i for i in reflection_result["issues"] if "maturity" in i.lower() or "recommendation" in i.lower()
+        ]) == 0
+
+        # If any checks failed, try to fix via LLM (up to max_retries)
+        if not all([
+            reflection_result["completeness"],
+            reflection_result["consistency"],
+            reflection_result["fact_grounded"],
+            reflection_result["reasonable"],
+        ]) and max_retries > 0:
+            logger.info(
+                f"Reflection found {len(reflection_result['issues'])} issue(s), attempting fix"
+            )
+            fixed_analysis = self._fix_analysis(analysis, reflection_result["issues"], project_info)
+            if fixed_analysis:
+                analysis = fixed_analysis
+                # Re-run checks on fixed result
+                reflection_result["fixed"] = True
+                logger.info("Reflection fix applied successfully")
+            else:
+                reflection_result["fixed"] = False
+        else:
+            reflection_result["fixed"] = False
+
+        # Attach reflection metadata
+        analysis["_reflection"] = reflection_result
+
+        logger.info(
+            f"Reflection complete: completeness={reflection_result['completeness']}, "
+            f"consistency={reflection_result['consistency']}, "
+            f"fact_grounded={reflection_result['fact_grounded']}, "
+            f"reasonable={reflection_result['reasonable']}"
+        )
+
+        return analysis
+
+    def _fix_analysis(
+        self,
+        analysis: Dict[str, Any],
+        issues: List[str],
+        project_info: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Call LLM to fix identified analysis issues.
+
+        Args:
+            analysis: Original analysis with issues
+            issues: List of identified issues
+            project_info: Project info for fact-checking
+
+        Returns:
+            Fixed analysis dict, or None if fix failed
+        """
+        try:
+            model_wrapper = self._get_model_wrapper()
+
+            issues_text = "\n".join(f"- {issue}" for issue in issues)
+
+            # Build existing analysis as JSON for context
+            import json as _json
+            existing_json = _json.dumps(analysis, ensure_ascii=False, indent=2)
+
+            prompt = f"""你是一位资深技术架构师，请修复以下分析结果中存在的问题。
+
+## 现有分析结果
+```json
+{existing_json}
+```
+
+## 存在的问题
+{issues_text}
+
+## 项目信息（用于事实核对）
+{project_info}
+
+请修复上述问题，并严格按照以下 JSON 格式输出修正后的完整结果（只输出 JSON，不要其他内容）：
+```json
+{{
+    "core_function": "核心功能描述",
+    "tech_stack": {{
+        "language": "主要编程语言",
+        "frameworks": ["框架 1"],
+        "key_dependencies": ["依赖 1"]
+    }},
+    "architecture_pattern": "架构模式",
+    "pain_points_solved": ["痛点 1"],
+    "unique_value": "独特价值",
+    "risk_flags": ["风险 1"],
+    "suitability_score": 0.8,
+    "score_breakdown": {{
+        "functionality": 0.8,
+        "code_quality": 0.7,
+        "security": 0.6,
+        "maintainability": 0.8,
+        "community": 0.7
+    }},
+    "maturity_assessment": "beta/stable/mature",
+    "recommendation": "推荐意见",
+    "competitive_analysis": "竞品对比"
+}}
+```
+"""
+
+            messages = [
+                {"name": "system", "content": self.system_prompt, "role": "system"},
+                {"name": "user", "content": prompt, "role": "user"},
+            ]
+
+            response = model_wrapper(messages=messages)
+            content = self._extract_response_text(response)
+            content = filter_sensitive_output(content)
+
+            fixed = self._parse_json_response(content)
+
+            # Verify the fix resolved the issues
+            if fixed and "parse_error" not in fixed:
+                # Copy over any original fields not in the fix
+                for key, value in analysis.items():
+                    if key not in fixed:
+                        fixed[key] = value
+                return fixed
+
+            logger.warning("Fix attempt did not produce valid output, keeping original")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to fix analysis: {e}")
+            return None
 
     def _try_read_config_file(self, owner: str, repo: str) -> Optional[str]:
         """

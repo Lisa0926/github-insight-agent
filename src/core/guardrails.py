@@ -16,6 +16,7 @@ import time
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from src.core.kpi_tracker import _load_role_kpi_config
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,8 +26,9 @@ logger = get_logger(__name__)
 # 1. Prompt Injection Protection
 # ============================================================
 
-# Known prompt injection patterns (case-insensitive)
+# Known prompt injection patterns (English + Chinese)
 _INJECTION_PATTERNS: List[re.Pattern] = [
+    # English patterns
     re.compile(r"(?i)ignore\s+(all\s+)?(previous|prior)\s+(instructions?|rules?|directives)", re.IGNORECASE),
     re.compile(r"(?i)(ignore|disregard)\s+(all\s+)?(system|previous)\s+(prompt|instructions?|rules?)", re.IGNORECASE),
     re.compile(r"(?i)(you\s+are?\s+now|act\s+as|assume\s+the\s+role)\s+of", re.IGNORECASE),
@@ -42,6 +44,22 @@ _INJECTION_PATTERNS: List[re.Pattern] = [
     re.compile(r"(?i)(new|different|alternate)\s+system\s+prompt", re.IGNORECASE),
     re.compile(r"(?i)(helpful|obedient)\s+assistant\s+(will|should)\s+(always|never)", re.IGNORECASE),
     re.compile(r"(?i)(do\s+not\s+(follow|use)\s+(any|the)\s+rules)", re.IGNORECASE),
+    # Chinese patterns (中文注入攻击防护)
+    re.compile(r"(?:忽\s*略|忽\s*视|无\s*视)\s*(?:所有\s*(?:的\s*)?)?(?:以上|之前|先前|前面)\s*(?:所有\s*(?:的\s*)?)?(?:的\s*)?(?:规则|指令|指示|限制|约束|约束条件|设定)", re.IGNORECASE),
+    re.compile(r"(?:你\s*(?:现在|如今)|当前)\s*(?:是|变成|成为|作为)\s*(?:一个)?", re.IGNORECASE),
+    re.compile(r"(?:扮演|充当|假装|模拟)\s*(?:一个)?(?:不受\s*限制|没有\s*安全\s*限制|自由\s*模式)\s*的?\s*(?:不受\s*限制\s*的|自由\s*模式的|新的?\s*)?(?:角色|助手|系统|模型)", re.IGNORECASE),
+    re.compile(r"(?:忘记|忽略|清除|去掉)\s*(?:所有\s*)?(?:安全\s*)?(?:限制|规则|约束|防护| guard)", re.IGNORECASE),
+    re.compile(r"(?:绕过|突破|解除|跳过)\s*(?:所有\s*)?(?:安全\s*)?(?:的\s*)?(?:限制|规则|约束|防护|检查)", re.IGNORECASE),
+    re.compile(r"(?:执行|运行)\s*(?:系统\s*)?(?:命令|脚本|代码|python|shell|bash)", re.IGNORECASE),
+    re.compile(r"(?:重复|复述|复制|输出|打印)\s*(?:以上|所有|前面|之前|从头)\s*(?:所有\s*)?(?:的\s*)?(?:内容|信息|文字|一切)", re.IGNORECASE),
+    re.compile(r"(?:输出|显示|展示|打印|透露)\s*(?:你的|我的|当前|系统)\s*(?:的\s*)?(?:系统\s*)?(?:提示词|prompt|指令|规则|设定|配置)", re.IGNORECASE),
+    re.compile(r"(?:不要|别|切勿|禁止)\s*(?:遵守|遵循|服从)\s*(?:任何|所有\s*)?(?:规则|指令|限制|约束)", re.IGNORECASE),
+    re.compile(r"(?:覆盖|替换|更改|修改)\s*(?:所有\s*(?:的\s*)?)?(?:原有|原来|原始|之前|当前)\s*(?:的\s*)?(?:所有\s*)?(?:的\s*)?(?:指令|规则|提示|设定)", re.IGNORECASE),
+    re.compile(r"(?:新的?|不同的?|另一个)\s*(?:系统\s*)?(?:设定|配置|角色|模式|行为)", re.IGNORECASE),
+    re.compile(r"(?:越狱|突破\s*限制|解锁\s*模式|自由\s*模式)", re.IGNORECASE),
+    re.compile(r"(?:跳过|免除)\s*(?:所有\s*)?(?:安全\s*)?(?:检查|步骤|规则|限制)", re.IGNORECASE),
+    re.compile(r"(?:帮助|请问|如何)\s*(?:才能|可以|能够|我)\s*(?:绕过|突破|跳过|违反)\s*.*?\s*(?:规则|限制)", re.IGNORECASE),
+    re.compile(r"(?:无条件|绝对|总是|永远)\s*(?:服从|执行|遵守|回答)", re.IGNORECASE),
 ]
 
 # Maximum length for user input (prevent context window attacks)
@@ -75,9 +93,11 @@ def sanitize_user_input(user_input: str, max_length: int = MAX_USER_INPUT_LENGTH
         )
         user_input = user_input[:max_length]
 
-    # Check for injection patterns
+    # Check for injection patterns (against original and whitespace-collapsed versions
+    # to catch obfuscation like "忽 略 以 上 规 则" → "忽略以上规则")
+    _collapsed_input = re.sub(r"\s+", "", user_input)
     for pattern in _INJECTION_PATTERNS:
-        if pattern.search(user_input):
+        if pattern.search(user_input) or pattern.search(_collapsed_input):
             logger.warning(f"Potential prompt injection detected: {pattern.pattern}")
             raise ValueError(
                 "Potential prompt injection detected. Please rephrase your query."
@@ -283,17 +303,27 @@ _global_circuit_breaker: Optional[AgentCircuitBreaker] = None
 
 
 def get_circuit_breaker(
-    max_steps: int = 50,
-    max_time_seconds: int = 180,
-    max_tokens: int = 5000,
+    max_steps: int = None,
+    max_time_seconds: int = None,
+    max_tokens: int = None,
 ) -> AgentCircuitBreaker:
-    """Get or create the global circuit breaker."""
+    """Get or create the global circuit breaker.
+
+    Defaults are read from role_kpi.yaml global_constraints when available,
+    with explicit parameters taking precedence.
+    """
     global _global_circuit_breaker
     if _global_circuit_breaker is None:
+        # Load defaults from role_kpi.yaml
+        kpi = _load_role_kpi_config() or {}
+        constraints = kpi.get("global_constraints", {})
+        cost_config = constraints.get("cost_control", {})
+        cb_config = cost_config.get("circuit_breaker", {})
+
         _global_circuit_breaker = AgentCircuitBreaker(
-            max_steps=max_steps,
-            max_time_seconds=max_time_seconds,
-            max_tokens=max_tokens,
+            max_steps=max_steps if max_steps is not None else cb_config.get("max_steps", 50),
+            max_time_seconds=max_time_seconds if max_time_seconds is not None else cb_config.get("max_time_seconds", 180),
+            max_tokens=max_tokens if max_tokens is not None else cost_config.get("max_tokens_per_session", 5000),
         )
     return _global_circuit_breaker
 

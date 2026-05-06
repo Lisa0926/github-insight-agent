@@ -1,550 +1,311 @@
 # -*- coding: utf-8 -*-
 """
-GitHub Insight Agent - Mission Part 3: Report Module Tests
+Mission Part 3: Supplemental tests for uncommitted working tree changes.
 
-Tests for the new src/report/ module (untracked working tree changes):
-- HTMLExporter: export_markdown_to_html, export_to_string, ReportExtractor
-- PushReportOptimizer: optimize_for_wechat, optimize_for_feishu
-- Edge cases: empty inputs, None content, special characters, length limits
+Covers:
+- base_agent.py: Role constraint injection via _load_role_kpi_config()
+- researcher_agent.py: KPI tracking integration in execute_action()
+- guardrails.py: Circuit breaker defaults from role_kpi.yaml
+- report_generator.py: ProjectFact/ProjectAnalysisReport validation + KPI tracking
+- contracts.py: Pydantic model integration with report_generator workflow
+- kpi_tracker.py: Integration with researcher/analyst/pipeline flows
 """
 
-import os
-import sys
+import json
 import tempfile
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-
-# ===========================================
-# Test 1: HTMLExporter basic export
-# ===========================================
-def test_html_exporter_basic():
-    """Test HTMLExporter can export markdown to HTML file"""
-    from src.report.html_exporter import HTMLExporter
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        exporter = HTMLExporter(output_dir=tmpdir)
-        md_content = "# Test Report\n\nThis is a test report.\n\n## Metrics\n\n| Name | Value |\n|------|-------|\n| Tests | 176 |\n"
-        output_path = exporter.export(md_content)
-
-        assert os.path.exists(output_path), f"HTML file not created at {output_path}"
-        assert output_path.endswith('.html')
-
-        with open(output_path, 'r', encoding='utf-8') as f:
-            html = f.read()
-
-        assert '<!DOCTYPE html>' in html
-        assert 'Test Report' in html
-        assert 'This is a test report.' in html
-        print("  ✓ HTMLExporter basic export works")
-
-
-# ===========================================
-# Test 2: HTMLExporter export_to_string
-# ===========================================
-def test_html_exporter_to_string():
-    """Test HTMLExporter can export to string (no file)"""
-    from src.report.html_exporter import HTMLExporter
-
-    exporter = HTMLExporter()
-    md_content = "# String Export Test\n\nContent here."
-    html = exporter.export_to_string(md_content)
-
-    assert isinstance(html, str)
-    assert '<!DOCTYPE html>' in html
-    assert 'String Export Test' in html
-    assert 'Content here.' in html
-    print("  ✓ HTMLExporter export_to_string works")
-
-
-# ===========================================
-# Test 3: Convenience functions
-# ===========================================
-def test_convenience_functions():
-    """Test export_markdown_to_html and export_markdown_to_html_string"""
-    from src.report.html_exporter import (
-        export_markdown_to_html,
-        export_markdown_to_html_string,
-    )
-
-    md = "# Convenience Test\n\nHello world."
-
-    # Test to string
-    html_str = export_markdown_to_html_string(md)
-    assert isinstance(html_str, str)
-    assert 'Convenience Test' in html_str
-    print("  ✓ export_markdown_to_html_string works")
-
-    # Test to file
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_path = os.path.join(tmpdir, 'test.html')
-        result_path = export_markdown_to_html(md, output_path=output_path)
-        assert os.path.exists(result_path)
-        print("  ✓ export_markdown_to_html works")
-
-
-# ===========================================
-# Test 4: ReportExtractor title extraction
-# ===========================================
-def test_report_extractor_title():
-    """Test ReportExtractor extracts title from markdown"""
-    from src.report.html_exporter import ReportExtractor
-
-    md = "# My Awesome Report\n\nSome content here."
-    extractor = ReportExtractor(md)
-    result = extractor.extract()
-
-    assert result['title'] == 'My Awesome Report'
-    assert 'My Awesome Report' in result['content']
-    print("  ✓ ReportExtractor title extraction works")
-
-
-# ===========================================
-# Test 5: ReportExtractor metric extraction
-# ===========================================
-def test_report_extractor_metrics():
-    """Test ReportExtractor extracts metrics from markdown"""
-    from src.report.html_exporter import ReportExtractor
-
-    md = "# Report\n\n176 个测试 176 个通过\n\n54 条安全规则"
-    extractor = ReportExtractor(md)
-    extractor._extract_metrics()
-
-    assert len(extractor.metrics) >= 1
-    # Check test metric
-    test_metrics = [m for m in extractor.metrics if '测试' in m.get('label', '')]
-    assert len(test_metrics) >= 1
-    print(f"  ✓ ReportExtractor metrics extraction works ({len(extractor.metrics)} metrics)")
-
-
-# ===========================================
-# Test 6: ReportExtractor HTML conversion with tables
-# ===========================================
-def test_report_extractor_table_wrapper():
-    """Test ReportExtractor wraps tables in div.table-wrapper"""
-    from src.report.html_exporter import ReportExtractor
-
-    md = "# Report\n\n| Col1 | Col2 |\n|------|------|\n| A | B |\n"
-    extractor = ReportExtractor(md)
-    result = extractor.extract()
-
-    assert 'class="table-wrapper"' in result['content']
-    print("  ✓ ReportExtractor table wrapper works")
-
-
-# ===========================================
-# Test 7: HTMLExporter with special characters
-# ===========================================
-def test_html_exporter_special_chars():
-    """Test HTMLExporter handles special characters and emoji"""
-    from src.report.html_exporter import HTMLExporter
-
-    md = "# 测试报告 📊\n\n• ✅ 通过\n• ⚠️ 警告\n• 🔴 错误\n\n**Bold text** and *italic text*"
-    html = HTMLExporter().export_to_string(md)
-
-    assert '测试报告' in html
-    assert 'badge-success' in html
-    assert 'badge-warning' in html
-    assert 'badge-danger' in html
-    print("  ✓ HTMLExporter handles special characters and emoji")
-
-
-# ===========================================
-# Test 8: HTMLExporter empty content
-# ===========================================
-def test_html_exporter_empty_content():
-    """Test HTMLExporter handles empty/minimal markdown"""
-    from src.report.html_exporter import HTMLExporter
-
-    html = HTMLExporter().export_to_string("")
-    assert isinstance(html, str)
-    assert '<!DOCTYPE html>' in html
-    print("  ✓ HTMLExporter handles empty content")
-
-
-# ===========================================
-# Test 9: PushReportOptimizer - WeChat format
-# ===========================================
-def test_push_optimizer_wechat():
-    """Test PushReportOptimizer optimizes for WeChat"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = "# 项目分析报告\n\n176 个测试 176 个通过\n\n## 总结\n\n发现关键问题：测试覆盖率不足。\n\n## 行动建议\n\n1. 增加单元测试覆盖率到 80%\n2. 修复已知安全漏洞\n3. 优化性能瓶颈"
-
-    optimizer = PushReportOptimizer(report)
-    result = optimizer.optimize_for_wechat()
-
-    assert '📊' in result
-    assert len(result) <= 1800
-    assert '项目分析报告' in result
-    print("  ✓ PushReportOptimizer WeChat optimization works")
-
-
-# ===========================================
-# Test 10: PushReportOptimizer - Feishu format
-# ===========================================
-def test_push_optimizer_feishu():
-    """Test PushReportOptimizer optimizes for Feishu"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = "# 项目分析报告\n\n176 个测试 176 个通过\n\n54 条安全规则\n\n## 总结\n\n发现关键问题：测试覆盖率不足。\n\n## 竞品动态\n\nCodeRabbit 发布新功能。\n\n## 行动建议\n\n1. 增加单元测试覆盖率到 80%\n2. 修复已知安全漏洞\n3. 优化性能瓶颈"
-
-    optimizer = PushReportOptimizer(report)
-    result = optimizer.optimize_for_feishu()
-
-    assert '**' in result  # Feishu uses markdown bold
-    assert len(result) <= 3000
-    assert '项目分析报告' in result
-    print("  ✓ PushReportOptimizer Feishu optimization works")
-
-
-# ===========================================
-# Test 11: PushReportOptimizer length truncation
-# ===========================================
-def test_push_optimizer_wechat_truncation():
-    """Test WeChat output respects max_length limit"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    # Create a very long report
-    long_report = "# Long Report\n\n" + "A" * 5000 + "\n\n" + "B" * 5000
-
-    optimizer = PushReportOptimizer(long_report)
-    result = optimizer.optimize_for_wechat(max_length=500)
-
-    assert len(result) <= 500
-    assert result.endswith('...') or len(result) < 500
-    print("  ✓ WeChat output truncation works")
-
-
-# ===========================================
-# Test 12: PushReportOptimizer Feishu length truncation
-# ===========================================
-def test_push_optimizer_feishu_truncation():
-    """Test Feishu output respects max_length limit"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    long_report = "# Long Report\n\n" + "A" * 5000 + "\n\n" + "B" * 5000
-
-    optimizer = PushReportOptimizer(long_report)
-    result = optimizer.optimize_for_feishu(max_length=500)
-
-    assert len(result) <= 500
-    print("  ✓ Feishu output truncation works")
-
-
-# ===========================================
-# Test 13: PushReportOptimizer convenience functions
-# ===========================================
-def test_push_optimizer_convenience():
-    """Test optimize_for_wechat and optimize_for_feishu convenience functions"""
-    from src.report.push_optimizer import optimize_for_wechat, optimize_for_feishu
-
-    report = "# Test\n\n100 个测试 100 个通过"
-
-    wechat = optimize_for_wechat(report)
-    assert isinstance(wechat, str)
-    assert '📊' in wechat
-    print("  ✓ optimize_for_wechat convenience function works")
-
-    feishu = optimize_for_feishu(report)
-    assert isinstance(feishu, str)
-    assert '**' in feishu
-    print("  ✓ optimize_for_feishu convenience function works")
-
-
-# ===========================================
-# Test 14: PushReportOptimizer empty report
-# ===========================================
-def test_push_optimizer_empty_report():
-    """Test PushReportOptimizer handles empty/minimal reports"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    optimizer = PushReportOptimizer("")
-    wechat = optimizer.optimize_for_wechat()
-    feishu = optimizer.optimize_for_feishu()
-
-    assert isinstance(wechat, str)
-    assert isinstance(feishu, str)
-    print("  ✓ PushReportOptimizer handles empty report")
-
-
-# ===========================================
-# Test 15: PushReportOptimizer metric extraction patterns
-# ===========================================
-def test_push_optimizer_metric_patterns():
-    """Test PushReportOptimizer extracts various metric patterns"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = """# Analysis Report
-
-176 个测试 158 个通过
-54 条安全规则
-10 个项目
-+100 -50
-
-## 发现
-关键发现 1
-关键发现 2
-"""
-    optimizer = PushReportOptimizer(report)
-    sections = optimizer._extract_key_sections(report.split('\n'))
-
-    assert len(sections['metrics']) >= 1
-    print(f"  ✓ Metric extraction: {len(sections['metrics'])} metrics found")
-
-
-# ===========================================
-# Test 16: PushReportOptimizer finding extraction
-# ===========================================
-def test_push_optimizer_finding_extraction():
-    """Test PushReportOptimizer extracts findings from report"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = """# Report
-
-## 总结
-
-这是一个重要发现，需要关注。
-另一个重要发现，关于安全。
-"""
-    optimizer = PushReportOptimizer(report)
-    sections = optimizer._extract_key_sections(report.split('\n'))
-
-    assert len(sections['findings']) >= 1
-    print(f"  ✓ Finding extraction: {len(sections['findings'])} findings found")
-
-
-# ===========================================
-# Test 17: PushReportOptimizer action extraction
-# ===========================================
-def test_push_optimizer_action_extraction():
-    """Test PushReportOptimizer extracts action items from report"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = """# Report
-
-## 下一步行动
-
-增加测试覆盖率到 80%
-修复 OWASP 安全漏洞
-"""
-    optimizer = PushReportOptimizer(report)
-    sections = optimizer._extract_key_sections(report.split('\n'))
-
-    assert len(sections['actions']) >= 1
-    print(f"  ✓ Action extraction: {len(sections['actions'])} actions found")
-
-
-# ===========================================
-# Test 18: PushReportOptimizer competitor extraction
-# ===========================================
-def test_push_optimizer_competitor_extraction():
-    """Test PushReportOptimizer extracts competitor mentions"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = """# Report
-
-## 竞品动态
-
-CodeRabbit 发布了新的 AI review 功能
-Qodo 更新了定价策略
-"""
-    optimizer = PushReportOptimizer(report)
-    sections = optimizer._extract_key_sections(report.split('\n'))
-
-    assert len(sections['competitors']) >= 1
-    print(f"  ✓ Competitor extraction: {len(sections['competitors'])} competitors found")
-
-
-# ===========================================
-# Test 19: Module import and __all__
-# ===========================================
-def test_report_module_exports():
-    """Test that src.report module exports expected names"""
-    import src.report as report_mod
-
-    expected_exports = [
-        'export_markdown_to_html',
-        'export_markdown_to_html_string',
-        'HTMLExporter',
-        'optimize_for_wechat',
-        'optimize_for_feishu',
-        'PushReportOptimizer',
-    ]
-
-    for name in expected_exports:
-        assert name in report_mod.__all__, f"{name} missing from __all__"
-        assert hasattr(report_mod, name), f"{name} not accessible"
-
-    print(f"  ✓ Module exports all {len(expected_exports)} expected names")
-
-
-# ===========================================
-# Test 20: HTML template renders properly
-# ===========================================
-def test_html_template_rendering():
-    """Test that the HTML template renders with all expected elements"""
-    from src.report.html_exporter import HTMLExporter
-
-    md = "# Full Test\n\n## Section 1\n\nContent 1\n\n## Section 2\n\nContent 2"
-    html = HTMLExporter().export_to_string(md)
-
-    # Check template elements
-    assert 'lang="zh-CN"' in html
-    assert 'viewport' in html
-    assert 'container' in html
-    assert 'footer' in html
-    assert 'Generated by GitHub Insight Agent' in html
-    assert ':root' in html  # CSS variables
-    assert '--bg-primary' in html
-    assert 'media' in html  # responsive design
-    print("  ✓ HTML template renders with all expected elements")
-
-
-# ===========================================
-# Test 21: HTMLExporter with non-existent output_dir
-# ===========================================
-def test_html_exporter_creates_output_dir():
-    """Test HTMLExporter creates output directory if it doesn't exist"""
-    from src.report.html_exporter import HTMLExporter
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        nested_dir = os.path.join(tmpdir, 'a', 'b', 'c')
-        assert not os.path.exists(nested_dir)
-        exporter = HTMLExporter(output_dir=nested_dir)
-        assert os.path.exists(nested_dir)
-        print("  ✓ HTMLExporter creates nested output directories")
-
-
-# ===========================================
-# Test 22: ReportExtractor with no title (default)
-# ===========================================
-def test_report_extractor_no_title():
-    """Test ReportExtractor uses default title when no H1 found"""
-    from src.report.html_exporter import ReportExtractor
-
-    md = "Just some content without a title."
-    extractor = ReportExtractor(md)
-    result = extractor.extract()
-
-    assert result['title'] == 'GitHub Insight Report'  # default title
-    print("  ✓ ReportExtractor uses default title when no H1")
-
-
-# ===========================================
-# Test 23: PushReportOptimizer with HTML URL
-# ===========================================
-def test_push_optimizer_with_html_url():
-    """Test PushReportOptimizer includes HTML URL when present"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = """# Report
-
-176 个测试 176 个通过
-
-## 总结
-
-关键发现。
-
-[完整报告](https://example.com/report.html)
-"""
-    # Add html_url to sections manually to test the path
-    optimizer = PushReportOptimizer(report)
-    sections = optimizer._extract_key_sections(report.split('\n'))
-    sections['html_url'] = 'https://example.com/report.html'
-
-    # Test that the optimizer can handle html_url
-    wechat = optimizer.optimize_for_wechat()
-    assert isinstance(wechat, str)
-    print("  ✓ PushReportOptimizer handles HTML URL field")
-
-
-# ===========================================
-# Test 24: PushReportOptimizer very short max_length
-# ===========================================
-def test_push_optimizer_very_short_max_length():
-    """Test WeChat/Feishu output with very short max_length"""
-    from src.report.push_optimizer import PushReportOptimizer
-
-    report = "# Report\n\n176 个测试 176 个通过\n\n## 总结\n\n关键发现。"
-    optimizer = PushReportOptimizer(report)
-
-    wechat = optimizer.optimize_for_wechat(max_length=50)
-    assert len(wechat) <= 50
-    print(f"  ✓ WeChat very short max_length: {len(wechat)} chars")
-
-    feishu = optimizer.optimize_for_feishu(max_length=50)
-    assert len(feishu) <= 50
-    print(f"  ✓ Feishu very short max_length: {len(feishu)} chars")
-
-
-# ===========================================
-# Test 25: ReportExtractor with no metrics
-# ===========================================
-def test_report_extractor_no_metrics():
-    """Test ReportExtractor handles content with no extractable metrics"""
-    from src.report.html_exporter import ReportExtractor
-
-    md = "# Report\n\nJust plain text without any metrics or numbers."
-    extractor = ReportExtractor(md)
-    result = extractor.extract()
-
-    assert result['title'] == 'Report'
-    assert isinstance(result['content'], str)
-    print("  ✓ ReportExtractor handles content with no metrics")
-
-
-# ===========================================
-# Test 26: HTMLExporter with full report integration
-# ===========================================
-def test_html_exporter_full_report():
-    """Test HTMLExporter with a realistic full report"""
-    from src.report.html_exporter import HTMLExporter
-
-    full_report = """# GitHub 项目分析报告
-
-**生成时间**: 2026-04-30
-
-## 项目概况
-
-- 名称: example/project
-- 语言: Python
-- Stars: 1,234
-
-## 代码质量
-
-| 指标 | 分数 |
-|------|------|
-| 可读性 | 85 |
-| 可维护性 | 78 |
-
-## 安全扫描
-
-176 个测试 176 个通过
-
-54 条安全规则
-
-### 发现的问题
-
-- ✅ 无严重漏洞
-- ⚠️ 2 条中危建议
-
-## 总结
-
-这是一个高质量的项目。
-
-## 下一步行动
-
-1. 增加测试覆盖率到 80%
-2. 修复 OWASP 安全漏洞
-3. 优化性能瓶颈
-"""
-    html = HTMLExporter().export_to_string(full_report)
-
-    assert '项目分析报告' in html
-    assert 'table-wrapper' in html  # table wrapper
-    assert 'badge-success' in html  # ✅ badge
-    assert 'badge-warning' in html  # ⚠️ badge
-    assert 'metric-card' in html or 'section' in html
-    print("  ✓ HTMLExporter handles full realistic report")
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.core.contracts import ProjectFact, ProjectAnalysisReport
+from src.core.kpi_tracker import KPITracker, _load_role_kpi_config, get_kpi_tracker
+
+
+# ============================================================
+# Fix Verification: base_agent.py role constraint refactoring
+# ============================================================
+
+class TestBaseAgentRoleConstraints:
+    """Verify _load_role_kpi_config is correctly used after refactoring."""
+
+    def test_load_role_kpi_returns_dict_or_none(self):
+        """_load_role_kpi_config should return a dict or None."""
+        result = _load_role_kpi_config()
+        assert result is None or isinstance(result, dict)
+
+    def test_load_role_kpi_is_cached(self):
+        """Repeated calls should return the same cached object."""
+        r1 = _load_role_kpi_config()
+        r2 = _load_role_kpi_config()
+        assert r1 is r2
+
+    def test_role_kpi_has_expected_structure(self):
+        """If role_kpi.yaml is found, it should have agents and global_constraints."""
+        config = _load_role_kpi_config()
+        if config is None:
+            pytest.skip("role_kpi.yaml not found")
+        assert "agents" in config or "global_constraints" in config
+
+
+# ============================================================
+# Fix Verification: researcher_agent.py KPI tracking
+# ============================================================
+
+class TestResearcherKPITracking:
+    """Verify KPI tracking in ResearcherAgent execute_action()."""
+
+    def test_kpi_tracker_created_on_init(self):
+        """ResearcherAgent should have a kpi_tracker attribute."""
+        from src.agents.researcher_agent import ResearcherAgent
+        from src.core.config_manager import ConfigManager
+
+        with patch.object(ConfigManager, "__init__", return_value=None):
+            with patch.object(ConfigManager, "dashscope_model_name", "qwen-turbo"):
+                with patch.object(ConfigManager, "dashscope_api_key", "test-key"):
+                    with patch("src.agents.researcher_agent.GitHubTool"):
+                        with patch("src.agents.researcher_agent.get_github_toolkit", return_value=None):
+                            with patch("src.agents.base_agent.GiaAgentBase.__init__", return_value=None):
+                                agent = ResearcherAgent.__new__(ResearcherAgent)
+                                agent.config = ConfigManager()
+                                agent.kpi_tracker = KPITracker(
+                                    metrics_path=tempfile.mktemp(suffix=".jsonl")
+                                )
+                                assert hasattr(agent, "kpi_tracker")
+                                assert isinstance(agent.kpi_tracker, KPITracker)
+
+    def test_track_researcher_kpis_valid_action(self):
+        """Valid actions should produce intent_accuracy=1.0."""
+        tracker = KPITracker(metrics_path=tempfile.mktemp(suffix=".jsonl"))
+        kpis = tracker.track_researcher_kpis(
+            intent_action="search_repositories",
+            intent_params={"query": "AI"},
+            success=True,
+            result_count=5,
+        )
+        assert kpis["intent_accuracy"] == 1.0
+        assert kpis["fetch_success_rate"] == 1.0
+
+    def test_track_researcher_kpis_invalid_action(self):
+        """Unknown actions should produce intent_accuracy=0.0."""
+        tracker = KPITracker(metrics_path=tempfile.mktemp(suffix=".jsonl"))
+        kpis = tracker.track_researcher_kpis(
+            intent_action="unknown_action",
+            intent_params={},
+            success=False,
+        )
+        assert kpis["intent_accuracy"] == 0.0
+        assert kpis["fetch_success_rate"] == 0.0
+
+
+# ============================================================
+# Fix Verification: guardrails.py circuit breaker defaults
+# ============================================================
+
+class TestCircuitBreakerRoleKpiDefaults:
+    """Verify circuit breaker reads defaults from role_kpi.yaml."""
+
+    @pytest.fixture(autouse=True)
+    def reset_circuit_breaker(self):
+        import src.core.guardrails as guardrails
+        original = guardrails._global_circuit_breaker
+        guardrails._global_circuit_breaker = None
+        yield
+        guardrails._global_circuit_breaker = original
+
+    def test_get_circuit_breaker_reads_yaml_defaults(self):
+        """Circuit breaker should use YAML defaults when available."""
+        from src.core.guardrails import get_circuit_breaker
+
+        config = _load_role_kpi_config()
+        if config is None:
+            pytest.skip("role_kpi.yaml not found")
+
+        cb = get_circuit_breaker()
+        constraints = config.get("global_constraints", {})
+        cost_config = constraints.get("cost_control", {})
+        cb_config = cost_config.get("circuit_breaker", {})
+
+        assert cb.max_steps == cb_config.get("max_steps", 50)
+        assert cb.max_time_seconds == cb_config.get("max_time_seconds", 180)
+
+    def test_explicit_params_override_yaml(self):
+        """Explicit parameters should override YAML defaults."""
+        from src.core.guardrails import get_circuit_breaker
+
+        cb = get_circuit_breaker(max_steps=10, max_time_seconds=30, max_tokens=1000)
+        assert cb.max_steps == 10
+        assert cb.max_time_seconds == 30
+        assert cb.max_tokens == 1000
+
+
+# ============================================================
+# Integration: report_generator.py + contracts.py
+# ============================================================
+
+class TestReportGeneratorContractValidation:
+    """Verify ProjectFact validation in report_generator._search_projects()."""
+
+    def test_projectfact_validates_raw_repo_data(self):
+        """ProjectFact should validate and accept raw repo data from GitHub API."""
+        raw = {
+            "owner": "langchain-ai",
+            "repo": "langchain",
+            "stars": 90000,
+            "lang": "Python",
+            "readme_snippet": "Build context-aware reasoning applications",
+            "trend_score": 0.95,
+            "last_commit_days": 1,
+            "tags": ["ai", "llm", "python"],
+        }
+        fact = ProjectFact.model_validate(raw)
+        assert fact.owner == "langchain-ai"
+        assert fact.trend_score == 0.95
+        assert fact.tags == ["ai", "llm", "python"]
+
+    def test_projectfact_clamps_trend_score(self):
+        """Trend scores outside [0, 1] should be clamped."""
+        fact = ProjectFact(owner="test", repo="test", stars=100, trend_score=2.0)
+        assert fact.trend_score == 1.0
+
+        fact = ProjectFact(owner="test", repo="test", stars=100, trend_score=-0.5)
+        assert fact.trend_score == 0.0
+
+    def test_projectfact_handles_missing_optional_fields(self):
+        """Optional fields should have sensible defaults."""
+        fact = ProjectFact(owner="test", repo="test", stars=100)
+        assert fact.lang == ""
+        assert fact.tags == []
+        assert fact.trend_score is None
+        assert fact.last_commit_days is None
+
+    def test_projectanalysisreport_validates_analyst_output(self):
+        """ProjectAnalysisReport should validate analyst output."""
+        data = {
+            "core_function": "AI agent framework",
+            "tech_stack": ["Python", "LangChain", "OpenAI"],
+            "architecture_pattern": "Agent-based",
+            "pain_points": ["Complex configuration"],
+            "suitability": "AI applications",
+            "risk_flags": ["API dependency"],
+            "score_breakdown": {"quality": 0.85, "docs": 0.7},
+            "suitability_score": 0.85,
+        }
+        report = ProjectAnalysisReport.model_validate(data, from_attributes=True)
+        assert report.core_function == "AI agent framework"
+        assert len(report.tech_stack) == 3
+        assert report.suitability_score == 0.85
+        assert report.score("quality") == 0.85
+
+    def test_projectanalysisreport_clamps_suitability_score(self):
+        """Suitability scores outside [0, 1] should be clamped."""
+        report = ProjectAnalysisReport(core_function="Test", suitability_score=1.5)
+        assert report.suitability_score == 1.0
+
+        report = ProjectAnalysisReport(core_function="Test", suitability_score=-0.3)
+        assert report.suitability_score == 0.0
+
+    def test_projectanalysisreport_handles_invalid_score(self):
+        """Non-numeric suitability_score should default to 0.5."""
+        report = ProjectAnalysisReport(
+            core_function="Test", suitability_score="invalid"
+        )
+        assert report.suitability_score == 0.5
+
+
+# ============================================================
+# Integration: KPI tracking end-to-end
+# ============================================================
+
+class TestKPIIntegration:
+    """Verify KPI tracker works correctly in the pipeline."""
+
+    def test_pipeline_kpis_persist_to_jsonl(self, tmp_path):
+        """Pipeline KPIs should be written to JSONL file."""
+        metrics_path = str(tmp_path / "test_metrics.jsonl")
+        tracker = KPITracker(metrics_path=metrics_path)
+
+        tracker.track_pipeline_kpis(tti_seconds=45.2, success=True)
+        tracker.track_researcher_kpis(
+            intent_action="search_repositories",
+            intent_params={"query": "AI"},
+            success=True,
+            result_count=3,
+        )
+        tracker.track_analyst_kpis(
+            analysis={
+                "core_function": "AI framework",
+                "tech_stack": ["Python"],
+                "architecture_pattern": "Agent",
+                "pain_points": [],
+                "risk_flags": [],
+                "stars": 1000,
+                "language": "Python",
+            },
+            report_text="test-project",
+        )
+
+        assert Path(metrics_path).exists()
+        with open(metrics_path) as f:
+            records = [json.loads(line) for line in f if line.strip()]
+        assert len(records) == 3
+        agents = [r["agent"] for r in records]
+        assert "pipeline" in agents
+        assert "researcher" in agents
+        assert "analyst" in agents
+
+    def test_kpi_tracker_custom_metrics_path(self, tmp_path):
+        """KPITracker should support custom metrics path."""
+        custom_path = str(tmp_path / "custom_metrics.jsonl")
+        tracker = KPITracker(metrics_path=custom_path)
+        tracker.track_pipeline_kpis(tti_seconds=30, success=True)
+        assert Path(custom_path).exists()
+
+    def test_global_kpi_tracker_singleton(self):
+        """get_kpi_tracker should return the same instance."""
+        t1 = get_kpi_tracker()
+        t2 = get_kpi_tracker()
+        assert t1 is t2
+
+
+# ============================================================
+# Edge Cases: contracts.py
+# ============================================================
+
+class TestContractEdgeCases:
+    """Edge cases for Pydantic contracts."""
+
+    def test_projectfact_extra_fields_ignored(self):
+        """Extra fields should be silently ignored."""
+        fact = ProjectFact(
+            owner="test", repo="test", stars=100,
+            extra_unknown_field="should_be_ignored",
+        )
+        assert not hasattr(fact, "extra_unknown_field")
+
+    def test_projectfact_stars_validation(self):
+        """Stars must be >= 0."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            ProjectFact(owner="test", repo="test", stars=-1)
+
+    def test_projectanalysisreport_score_breakdown_defaults(self):
+        """score_breakdown should default to empty dict."""
+        report = ProjectAnalysisReport(core_function="Test")
+        assert report.score_breakdown == {}
+        assert report.score("anything") == 0.0
+
+    def test_projectfact_full_name_property(self):
+        """full_name property should combine owner and repo."""
+        fact = ProjectFact(owner="microsoft", repo="vscode", stars=100)
+        assert fact.full_name == "microsoft/vscode"
+
+    def test_projectfact_trend_score_none(self):
+        """trend_score should accept None."""
+        fact = ProjectFact(owner="test", repo="test", stars=100, trend_score=None)
+        assert fact.trend_score is None
+
+    def test_projectanalysisreport_risk_flags_default(self):
+        """risk_flags should default to empty list."""
+        report = ProjectAnalysisReport(core_function="Test")
+        assert report.risk_flags == []

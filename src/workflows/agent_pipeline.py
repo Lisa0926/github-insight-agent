@@ -236,6 +236,20 @@ class AgentPipeline:
         """Get workflow execution results"""
         return getattr(self, "results", {})
 
+    # ---- Feedback integration (delegated to ReportGenerator) ----
+
+    def rate_report(self, rating: str, reason: str = "") -> bool:
+        """Rate the last generated report (delegated to internal ReportGenerator)"""
+        return self._report_gen.rate_report(rating=rating, reason=reason)
+
+    def get_feedback_stats(self) -> Dict[str, Any]:
+        """Get aggregate feedback statistics."""
+        return self._report_gen.get_feedback_stats()
+
+    def get_recent_feedback(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent feedback entries."""
+        return self._report_gen.get_recent_feedback(limit=limit)
+
     def save_report(self, output_path: str) -> bool:
         """Save report to file"""
         results = self.get_results()

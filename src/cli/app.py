@@ -358,6 +358,10 @@ def run_interactive_mode():  # noqa: C901
                         reason=reason,
                         session_state=feedback_session,
                     )
+
+                    # Also feed into ReportGenerator KPI tracker (P2-9)
+                    report_gen.rate_report(rating=rating, reason=reason)
+
                     emoji = "👍" if rating == "good" else "👎"
                     renderer.print_success(f"已记录反馈 [{emoji} {rating}] (id={row_id})")
 

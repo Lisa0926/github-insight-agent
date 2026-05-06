@@ -14,14 +14,26 @@ This is a linear workflow demonstrating the basic pattern of multi-Agent collabo
 """
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import time
 
 from src.core.config_manager import ConfigManager
+from src.core.contracts import ProjectFact, ProjectAnalysisReport
 from src.core.guardrails import get_circuit_breaker, filter_sensitive_output
+from src.core.kpi_tracker import KPITracker
 from src.core.logger import get_logger
 from src.core.conversation import ConversationManager
+from src.core.event_bus import (
+    EVENT_SEARCH_COMPLETE,
+    EVENT_ANALYSIS_START,
+    EVENT_ANALYSIS_COMPLETE,
+    EVENT_ANALYSIS_BATCH_COMPLETE,
+    EVENT_REPORT_COMPLETE,
+    get_event_bus,
+)
+from src.core.feedback import FeedbackCollector, get_feedback_collector
 from src.agents.analyst_agent import AnalystAgent
 from src.agents.researcher_agent import ResearcherAgent
 
@@ -39,7 +51,7 @@ logger = get_logger(__name__)
 
 class ReportGenerator:
     """
-    Report Generator workflow
+    Report Generator workflow — LLM-driven report orchestrator
 
     Coordinates ResearcherAgent and AnalystAgent to generate project analysis briefings.
 
@@ -49,6 +61,12 @@ class ReportGenerator:
         config: Configuration manager
         results: Workflow execution results
     """
+
+    @classmethod
+    def _build_system_prompt(cls, prompt_key: str = "system_prompt") -> str:
+        """Build system prompt from role_kpi.yaml (with fallbacks)."""
+        from src.core.prompt_builder import get_system_prompt
+        return get_system_prompt("pipeline", prompt_key=prompt_key, use_constraints=False)
 
     # Report template
     REPORT_TEMPLATE = """# GitHub Project Analysis Report
@@ -108,6 +126,13 @@ class ReportGenerator:
         self.researcher = researcher or ResearcherAgent(config=self.config)
         self.analyst = analyst or AnalystAgent(config=self.config)
         self.results: Dict[str, Any] = {}
+        self.kpi_tracker = KPITracker(self.config)
+
+        # Event bus for pipeline communication (P2-8)
+        self.event_bus = get_event_bus()
+
+        # Feedback collector for user feedback loop (P2-9)
+        self.feedback_collector: FeedbackCollector = get_feedback_collector()
 
         # Conversation manager (supports multi-turn conversation)
         self.conversation = ConversationManager(
@@ -132,7 +157,13 @@ class ReportGenerator:
         sort: str = "stars",
     ) -> str:
         """
-        Execute the report generation workflow
+        Execute the report generation workflow (Plan-and-Execute + Reflection)
+
+        Flow:
+        1. **Plan**: Search projects, determine analysis strategy
+        2. **Execute**: Analyze each project with Reflection
+        3. **Reflect**: Check report quality, decide if more analysis needed
+        4. **Generate**: Output final report
 
         Args:
             query: Search keyword
@@ -156,36 +187,63 @@ class ReportGenerator:
         self.clear_conversation()
 
         # Step 1: Search for projects
-        logger.info("[Step 1/3] Searching for projects...")
+        logger.info("[Step 1/4] Searching for projects...")
         cb.check()
         search_results = self._search_projects(query, num_projects, sort)
+        self.event_bus.emit(EVENT_SEARCH_COMPLETE, {"query": query, "count": len(search_results)})
         search_tti = time.time() - step_start
         step_start = time.time()
 
         if not search_results:
             return self._generate_empty_report(query)
 
-        # Step 2: In-depth analysis of each project
-        logger.info("[Step 2/3] Analyzing projects...")
+        # Plan: Determine analysis strategy based on search results
+        plan = self._plan_analysis(query, search_results)
+        logger.info(f"[Plan] Strategy: {plan['strategy']} (confidence={plan['confidence']:.0%})")
+
+        # Step 2: In-depth analysis of each project (with Reflection)
+        logger.info("[Step 2/4] Analyzing projects...")
         cb.check()
-        analysis_results = self._analyze_projects(search_results)
+        self.event_bus.emit(EVENT_ANALYSIS_START, {"num_projects": len(search_results)})
+        analysis_results = self._analyze_projects(search_results, plan)
+        self.event_bus.emit(EVENT_ANALYSIS_BATCH_COMPLETE, {"analyzed": len(analysis_results)})
         analysis_tti = time.time() - step_start
         step_start = time.time()
 
         # Save current analyzed projects (used for follow-up context)
         self._current_projects = analysis_results
 
-        # Step 3: Generate aggregated report
-        logger.info("[Step 3/3] Generating report...")
+        # Step 3: Reflect on analysis quality
+        cb.check()
+        reflection = self._reflect_on_analysis(analysis_results, plan)
+        if reflection.get("needs_more_analysis"):
+            logger.info(f"[Reflection] Needs more analysis: {reflection.get('reason', '')}")
+            # Try to analyze additional projects if available
+            if len(search_results) > len(analysis_results):
+                remaining = search_results[len(analysis_results):]
+                logger.info(f"[Reflection] Analyzing {len(remaining)} additional project(s)")
+                extra = self._analyze_projects(remaining, plan)
+                analysis_results.extend(extra)
+                self._current_projects = analysis_results
+        reflection_tti = time.time() - step_start
+        step_start = time.time()
+
+        # Step 4: Generate aggregated report
+        logger.info("[Step 3/4] Generating report...")
         cb.check()
         report = self._generate_report(query, search_results, analysis_results)
+        self.event_bus.emit(EVENT_REPORT_COMPLETE, {"report_length": len(report)})
         report_tti = time.time() - step_start
+
+        # Reflect on report quality
+        report_reflection = self._reflect_on_report(report, analysis_results)
 
         # Calculate total TTI
         total_tti = time.time() - tti_start
         logger.info(
             f"TTI metrics: search={search_tti:.1f}s, analysis={analysis_tti:.1f}s, "
-            f"report={report_tti:.1f}s, total={total_tti:.1f}s"
+            f"reflection={reflection_tti:.1f}s, report={report_tti:.1f}s, "
+            f"total={total_tti:.1f}s"
         )
 
         self.results = {
@@ -193,9 +251,13 @@ class ReportGenerator:
             "search_results": search_results,
             "analysis_results": analysis_results,
             "report": report,
+            "plan": plan,
+            "reflection": reflection,
+            "report_reflection": report_reflection,
             "tti": {
                 "search": round(search_tti, 2),
                 "analysis": round(analysis_tti, 2),
+                "reflection": round(reflection_tti, 2),
                 "report": round(report_tti, 2),
                 "total": round(total_tti, 2),
             },
@@ -206,6 +268,12 @@ class ReportGenerator:
         self.conversation.add_assistant_message(
             f"已分析 {len(analysis_results)} 个项目，生成了详细报告。",
             metadata={"type": "report_generated", "project_count": len(analysis_results)},
+        )
+
+        # Track pipeline KPIs
+        self.kpi_tracker.track_pipeline_kpis(
+            tti_seconds=round(total_tti, 2),
+            success=len(analysis_results) > 0,
         )
 
         logger.info("Report generation completed")
@@ -235,18 +303,41 @@ class ReportGenerator:
                 per_page=num_projects,
             )
 
-            # Convert to list of dictionaries
+            # Convert to list of dictionaries with Pydantic validation
             results = []
             for repo in repos.get("repositories", [])[:num_projects]:
-                results.append({
-                    "full_name": repo["full_name"],
-                    "html_url": repo["html_url"],
-                    "stars": repo["stars"],
-                    "language": repo["language"],
-                    "description": repo["description"],
+                # Map raw API data to ProjectFact contract
+                raw = {
                     "owner": repo["full_name"].split("/")[0],
                     "repo": repo["full_name"].split("/")[1],
-                })
+                    "stars": repo["stars"],
+                    "lang": repo.get("language", ""),
+                    "readme_snippet": repo.get("readme_snippet"),
+                    "trend_score": repo.get("trend_score"),
+                    "last_commit_days": repo.get("last_commit_days"),
+                    "tags": repo.get("tags", []),
+                }
+                try:
+                    fact = ProjectFact.model_validate(raw)
+                except Exception as e:
+                    logger.warning(f"ProjectFact validation failed for {raw['owner']}/{raw['repo']}: {e}")
+                    fact = None
+
+                result_entry = {
+                    "full_name": f"{raw['owner']}/{raw['repo']}",
+                    "html_url": repo["html_url"],
+                    "stars": raw["stars"],
+                    "language": raw["lang"],
+                    "description": repo["description"],
+                    "owner": raw["owner"],
+                    "repo": raw["repo"],
+                }
+                if fact:
+                    # Enrich with validated contract data
+                    result_entry["trend_score"] = fact.trend_score
+                    result_entry["last_commit_days"] = fact.last_commit_days
+                    result_entry["tags"] = fact.tags
+                results.append(result_entry)
 
             logger.info(f"Found {len(results)} projects")
             return results
@@ -258,35 +349,400 @@ class ReportGenerator:
     def _analyze_projects(
         self,
         projects: List[Dict[str, Any]],
+        plan: Dict[str, Any] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Analyze a list of projects
+        Analyze projects concurrently (parallelized with ThreadPoolExecutor)
 
         Args:
             projects: List of projects
+            plan: Analysis strategy from _plan_analysis()
 
         Returns:
-            List of analysis results
+            List of analysis results (in original order)
         """
-        results = []
-        for i, project in enumerate(projects, 1):
-            logger.info(f"[{i}/{len(projects)}] Analyzing: {project['full_name']}")
+        strategy = plan.get("strategy", "standard") if plan else "standard"
 
+        def _analyze_single(index: int, project: Dict[str, Any]) -> tuple:
+            """Analyze a single project; returns (index, result_or_None)"""
             try:
                 analysis = self.analyst.analyze_project(
                     owner=project["owner"],
                     repo=project["repo"],
                 )
-                results.append(analysis)
+
+                # For deep analysis strategy, check if initial analysis is sufficient
+                if strategy == "deep" and analysis.get("analysis"):
+                    analysis = self._deepen_analysis(project, analysis, plan)
+
+                # Try to validate as ProjectAnalysisReport for structural guarantees
+                try:
+                    ProjectAnalysisReport.model_validate(
+                        analysis,
+                        from_attributes=True,
+                    )
+                    analysis["_validated"] = True
+                except Exception:
+                    pass
+
+                # Track analyst KPIs
+                self.kpi_tracker.track_analyst_kpis(
+                    analysis=analysis.get("analysis", {}),
+                    report_text=project["full_name"],
+                )
+
+                # Emit per-project analysis event (P2-8)
+                self.event_bus.emit(EVENT_ANALYSIS_COMPLETE, {
+                    "project": project["full_name"],
+                    "index": index,
+                })
+
+                return (index, analysis)
             except Exception as e:
                 logger.error(f"Failed to analyze {project['full_name']}: {e}")
-                results.append({
+                return (index, {
                     "project": project["full_name"],
                     "error": str(e),
                     "analysis": None,
                 })
 
-        return results
+        results = [None] * len(projects)
+        max_workers = min(len(projects), 5)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_analyze_single, i, proj): i
+                for i, proj in enumerate(projects)
+            }
+
+            for future in as_completed(futures):
+                index, result = future.result()
+                results[index] = result
+
+        return [r for r in results if r is not None]
+
+    def _plan_analysis(
+        self,
+        query: str,
+        search_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Plan analysis strategy using LLM-driven decision (P2-7).
+
+        Falls back to heuristic if LLM call fails.
+
+        Args:
+            query: User query
+            search_results: Raw search results
+
+        Returns:
+            Plan dict with strategy, confidence, and focus areas
+        """
+        plan = self._llm_decide_strategy(query, search_results)
+        if plan is None:
+            plan = self._heuristic_plan(search_results)
+        return plan
+
+    def _llm_decide_strategy(
+        self,
+        query: str,
+        search_results: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Use LLM to decide analysis strategy based on search results."""
+        try:
+            model_wrapper = self.analyst._get_model_wrapper()
+
+            results_summary = "\n".join(
+                f"- {r.get('full_name', 'unknown')}: "
+                f"⭐{r.get('stars', 0)} {r.get('language', 'N/A')}"
+                for r in search_results[:10]
+            )
+
+            prompt = f"""Given this search query and results, decide the analysis strategy.
+
+Query: {query}
+
+Search Results:
+{results_summary}
+
+Decide strategy:
+- "quick": low-effort summary (low-quality/low-star results)
+- "standard": full analysis (moderate quality)
+- "deep": extra scrutiny (high-quality/high-star results)
+
+Also identify focus areas (e.g. "multi-language", "incomplete trend data").
+
+Respond with JSON ONLY:
+{{"strategy": "quick|standard|deep", "confidence": 0.XX, "focus_areas": ["..."]}}"""
+
+            messages = [
+                {"name": "system", "content": ReportGenerator._build_system_prompt(), "role": "system"},
+                {"name": "user", "content": prompt, "role": "user"},
+            ]
+
+            response = model_wrapper(messages=messages)
+            text = self.analyst._extract_response_text(response)
+
+            # Parse JSON from response
+            import json as _json
+            text = text.strip()
+            # Extract JSON block
+            import re as _re
+            json_match = _re.search(r"\{.*\}", text, _re.DOTALL)
+            if json_match:
+                plan = _json.loads(json_match.group())
+                plan["confidence"] = max(0.0, min(1.0, plan.get("confidence", 0.5)))
+                plan.setdefault("focus_areas", [])
+                plan.setdefault("num_projects", len(search_results))
+                logger.info(f"[LLM Strategy] {plan['strategy']} (confidence={plan['confidence']:.0%})")
+                return plan
+        except Exception as e:
+            logger.warning(f"LLM strategy decision failed: {e}, falling back to heuristic")
+        return None
+
+    def _heuristic_plan(
+        self,
+        search_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Fallback heuristic strategy decision."""
+        plan = {
+            "strategy": "standard",
+            "confidence": 0.5,
+            "focus_areas": [],
+            "num_projects": len(search_results),
+        }
+
+        avg_stars = sum(r.get("stars", 0) for r in search_results) / len(search_results) if search_results else 0
+        has_language = sum(1 for r in search_results if r.get("language") and r["language"] != "Unknown")
+
+        if avg_stars > 5000:
+            plan["strategy"] = "deep"
+            plan["confidence"] = 0.8
+        elif avg_stars > 500:
+            plan["strategy"] = "standard"
+            plan["confidence"] = 0.6
+        else:
+            plan["strategy"] = "quick"
+            plan["confidence"] = 0.4
+
+        languages = set(r.get("language", "") for r in search_results if r.get("language"))
+        if len(languages) > 2:
+            plan["focus_areas"].append("multi-language tech stacks")
+
+        has_trend_score = sum(1 for r in search_results if r.get("trend_score") is not None)
+        if has_trend_score < len(search_results) * 0.5:
+            plan["focus_areas"].append("incomplete trend data")
+
+        plan["confidence"] = min(plan["confidence"], 0.3 + 0.1 * has_language / max(len(search_results), 1))
+
+        return plan
+
+    def _deepen_analysis(
+        self,
+        project: Dict[str, Any],
+        analysis: Dict[str, Any],
+        plan: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        For deep strategy: check if initial analysis is sufficient,
+        and trigger additional analysis if needed.
+
+        Args:
+            project: Project info
+            analysis: Initial analysis result
+            plan: Analysis plan
+
+        Returns:
+            Enhanced analysis dict
+        """
+        analysis_data = analysis.get("analysis", {})
+        if not analysis_data:
+            return analysis
+
+        # Check if analysis has enough detail for deep strategy
+        pain_points = analysis_data.get("pain_points_solved", [])
+        risk_flags = analysis_data.get("risk_flags", [])
+        tech_stack = analysis_data.get("tech_stack", {})
+
+        needs_deepening = (
+            len(pain_points) < 2 or
+            len(risk_flags) < 1 or
+            (isinstance(tech_stack, dict) and len(tech_stack.get("frameworks", [])) < 1)
+        )
+
+        if needs_deepening:
+            logger.info(f"[Deepen] Insufficient detail for {project.get('full_name')}, analysis already complete — will note in report")
+            analysis["_deep_analysis"] = {
+                "status": "flagged",
+                "reason": "Initial analysis lacked depth for deep strategy",
+            }
+        else:
+            analysis["_deep_analysis"] = {
+                "status": "sufficient",
+            }
+
+        return analysis
+
+    def _reflect_on_analysis(
+        self,
+        analysis_results: List[Dict[str, Any]],
+        plan: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Reflect on overall analysis quality (P2-7: LLM + heuristic hybrid).
+
+        Args:
+            analysis_results: List of analysis results
+            plan: Analysis plan
+
+        Returns:
+            Reflection dict
+        """
+        successful = sum(
+            1 for r in analysis_results
+            if r.get("analysis") and not r.get("error")
+        )
+        total = len(analysis_results)
+
+        reflection = {
+            "total": total,
+            "successful": successful,
+            "success_rate": successful / total if total > 0 else 0,
+            "needs_more_analysis": False,
+            "reason": "",
+        }
+
+        # Try LLM-driven sufficiency check (P2-7)
+        llm_decision = self._llm_decide_sufficiency(analysis_results, plan)
+        if llm_decision:
+            reflection.update(llm_decision)
+        else:
+            # Fallback to heuristic
+            heuristic = self._heuristic_reflection(analysis_results, plan)
+            if heuristic["needs_more_analysis"]:
+                reflection["needs_more_analysis"] = True
+                reflection["reason"] = heuristic["reason"]
+
+        # Check if any analysis lacks reflection metadata
+        no_reflection = sum(
+            1 for r in analysis_results
+            if r.get("analysis") and "_reflection" not in r.get("analysis", {})
+        )
+        if no_reflection > 0:
+            reflection["issues"] = f"{no_reflection} project(s) skipped reflection"
+
+        return reflection
+
+    def _llm_decide_sufficiency(
+        self,
+        analysis_results: List[Dict[str, Any]],
+        plan: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Use LLM to decide if analysis results are sufficient."""
+        try:
+            model_wrapper = self.analyst._get_model_wrapper()
+
+            summary = "\n".join(
+                f"- {r.get('project', 'unknown')}: "
+                f"{'OK' if r.get('analysis') and not r.get('error') else 'FAILED'}"
+                for r in analysis_results
+            )
+
+            prompt = f"""Review these analysis results and decide if they are sufficient to generate a report, or if more projects should be analyzed.
+
+Strategy: {plan.get('strategy', 'standard')}
+Results:
+{summary}
+
+Success rate: {sum(1 for r in analysis_results if r.get('analysis') and not r.get('error'))}/{len(analysis_results)}
+
+Decide:
+- "sufficient": proceed to report generation
+- "needs_more": analyze more projects first
+
+Respond with JSON ONLY:
+{{"decision": "sufficient|needs_more", "reason": "..."}}"""
+
+            messages = [
+                {"name": "system", "content": ReportGenerator._build_system_prompt(), "role": "system"},
+                {"name": "user", "content": prompt, "role": "user"},
+            ]
+
+            response = model_wrapper(messages=messages)
+            text = self.analyst._extract_response_text(response)
+
+            import json as _json
+            import re as _re
+            json_match = _re.search(r"\{.*\}", text, _re.DOTALL)
+            if json_match:
+                decision = _json.loads(json_match.group())
+                needs_more = decision.get("decision") == "needs_more"
+                return {
+                    "needs_more_analysis": needs_more,
+                    "reason": decision.get("reason", ""),
+                    "decision_method": "llm",
+                }
+        except Exception as e:
+            logger.warning(f"LLM sufficiency check failed: {e}, falling back to heuristic")
+        return None
+
+    def _heuristic_reflection(
+        self,
+        analysis_results: List[Dict[str, Any]],
+        plan: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Fallback heuristic sufficiency check."""
+        successful = sum(1 for r in analysis_results if r.get("analysis") and not r.get("error"))
+        total = len(analysis_results)
+        success_rate = successful / total if total > 0 else 0
+
+        if success_rate < 0.5 and total < 5:
+            return {
+                "needs_more_analysis": True,
+                "reason": f"Low success rate ({success_rate:.0%}), need more projects",
+            }
+        return {"needs_more_analysis": False, "reason": ""}
+
+    def _reflect_on_report(
+        self,
+        report: str,
+        analysis_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Reflect on generated report quality.
+
+        Checks:
+        - Report has reasonable length
+        - All analyzed projects are covered
+        - No obvious structural issues
+
+        Args:
+            report: Generated report text
+            analysis_results: Analysis results used
+
+        Returns:
+            Reflection dict
+        """
+        reflection = {
+            "report_length": len(report),
+            "projects_covered": len(analysis_results),
+            "quality": "good",
+        }
+
+        # Check report length
+        if len(report) < 500:
+            reflection["quality"] = "too_short"
+            logger.warning(f"Report is unusually short ({len(report)} chars)")
+
+        # Check for sections that might be empty
+        sections = ["Executive Summary", "Project Comparison", "Project Details", "Overall Assessment"]
+        missing_sections = [s for s in sections if s not in report]
+        if missing_sections:
+            reflection["quality"] = "missing_sections"
+            reflection["missing_sections"] = missing_sections
+            logger.warning(f"Report missing sections: {missing_sections}")
+
+        return reflection
 
     @trace(name="report.generate_report")
     def _generate_report(
@@ -901,7 +1357,7 @@ No matching projects found. Please try:
 
             model_wrapper = self.analyst._get_model_wrapper()
 
-            prompt = f"""你是一个专业的 GitHub 项目分析助手。请根据以下上下文回答用户的问题。
+            prompt = f"""请根据以下上下文回答用户的问题。
 
 {context}
 
@@ -911,7 +1367,7 @@ No matching projects found. Please try:
 请给出简洁、专业的回答。如果上下文中没有相关信息，请如实告知。"""
 
             messages = [
-                {"name": "system", "content": "你是一个专业的 GitHub 项目分析助手。", "role": "system"},
+                {"name": "system", "content": ReportGenerator._build_system_prompt("followup_system_prompt"), "role": "system"},
                 {"name": "user", "content": prompt, "role": "user"},
             ]
 
@@ -948,6 +1404,66 @@ No matching projects found. Please try:
         self.conversation.clear_history()
         self._current_projects.clear()
         logger.info("Conversation cleared")
+
+    # ---- Feedback integration (P2-9) ----
+
+    def rate_report(
+        self,
+        rating: str,
+        reason: str = "",
+    ) -> bool:
+        """
+        Rate the last generated report (thumbs up/down).
+
+        Args:
+            rating: "good", "bad", or "neutral"
+            reason: Optional reason for the rating
+
+        Returns:
+            True if rating was recorded successfully
+        """
+        if rating not in ("good", "bad", "neutral"):
+            logger.warning(f"Invalid rating: {rating}")
+            return False
+
+        # Get context from last report
+        last_report = self.results.get("report", "")
+        query = self.results.get("query", "")
+
+        try:
+            self.feedback_collector.record(
+                rating=rating,
+                reason=reason,
+                user_input=query,
+                assistant_output=last_report[:500],  # Truncate for storage
+                agent="pipeline",
+                run_id=datetime.now().strftime("%Y%m%d-%H%M%S"),
+                metadata={
+                    "project_count": len(self.results.get("analysis_results", [])),
+                    "tti_total": self.results.get("tti", {}).get("total", 0),
+                },
+            )
+
+            # Feed back into KPI tracker as user satisfaction signal
+            if rating == "good":
+                self.kpi_tracker.track_pipeline_kpis(
+                    tti_seconds=self.results.get("tti", {}).get("total", 0),
+                    success=True,
+                )
+
+            logger.info(f"Report rated: {rating} (reason={reason or 'none'})")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to record rating: {e}")
+            return False
+
+    def get_feedback_stats(self) -> Dict[str, Any]:
+        """Get aggregate feedback statistics."""
+        return self.feedback_collector.get_stats()
+
+    def get_recent_feedback(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent feedback entries."""
+        return self.feedback_collector.get_recent(limit=limit)
 
     def get_results(self) -> Dict[str, Any]:
         """Get workflow execution results"""

@@ -12,7 +12,6 @@ Features:
 """
 
 import json
-import time
 from typing import Any, Dict, List, Optional, Union
 import re
 from datetime import datetime, timedelta
@@ -21,6 +20,7 @@ from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
 from src.core.guardrails import sanitize_user_input, filter_sensitive_output, circuit_breaker_guard
+from src.core.kpi_tracker import KPITracker
 from src.core.logger import get_logger
 from src.core.studio_helper import StudioHelper, set_global_studio_config
 from src.tools.github_tool import GitHubTool
@@ -243,20 +243,6 @@ class ResearcherAgent(GiaAgentBase):
           execute it, and return structured results.
     """
 
-    SYSTEM_PROMPT = """你是一个专业的开源情报研究员 (Open Source Intelligence Researcher)。
-
-## 你的任务
-1. 根据用户的查询，使用 GitHub 工具搜索相关项目
-2. 提取关键信息：项目名称、Star 数量、主要编程语言、简介
-3. 返回结构化数据或简洁的总结
-
-## 约束
-1. 只返回结构化数据或简洁的总结，不要编造数据
-2. 如果搜索结果为空，如实告知用户
-3. 返回的数据必须来自 API 调用结果
-4. 使用 Markdown 格式呈现结果，便于阅读
-"""
-
     def __init__(
         self,
         name: str = "Researcher",
@@ -267,10 +253,14 @@ class ResearcherAgent(GiaAgentBase):
         use_persistent: bool = True,
         db_path: str = "data/app.db",
     ):
+        from src.core.prompt_builder import get_system_prompt
+
+        system_prompt = get_system_prompt("researcher")
+
         super().__init__(
             name=name,
             model_name=model_name,
-            system_prompt=self.SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             config=config,
             use_persistent=use_persistent,
             db_path=db_path,
@@ -281,6 +271,8 @@ class ResearcherAgent(GiaAgentBase):
         self.use_persistent = use_persistent
 
         self.github_tool = GitHubTool(config=self.config)
+
+        self.kpi_tracker = KPITracker(self.config)
 
         self.toolkit = None
         if use_toolkit:
@@ -836,19 +828,40 @@ class ResearcherAgent(GiaAgentBase):
         logger.info(f"Executing action: {action}")
 
         # Step 2: Route to appropriate handler
+        result = None
+        success = False
+        result_count = 0
+
         if action == "search_repositories":
-            return self._execute_search(params)
+            result = self._execute_search(params)
+            success = result is not None and "搜索失败" not in result
+            result_count = params.get("limit", 5)
         elif action == "get_repo_info":
-            return self._execute_get_repo_info(params)
+            result = self._execute_get_repo_info(params)
+            success = result is not None and "未找到" not in result
         elif action == "analyze_project":
-            return self._execute_analyze_project(params, analyst=analyst)
+            result = self._execute_analyze_project(params, analyst=analyst)
+            success = result is not None and "失败" not in result
         elif action == "compare_repositories":
-            return self._execute_compare(params, analyst=analyst)
+            result = self._execute_compare(params, analyst=analyst)
+            success = result is not None
         elif action == "chat":
-            return self._call_llm(user_query)
+            result = self._call_llm(user_query)
+            success = True
         else:
             logger.warning(f"Unknown action: {action}")
-            return self._call_llm(user_query)
+            result = self._call_llm(user_query)
+            success = True
+
+        # Track researcher KPIs
+        self.kpi_tracker.track_researcher_kpis(
+            intent_action=action,
+            intent_params=params,
+            success=success,
+            result_count=result_count,
+        )
+
+        return result
 
     def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
         """Build message history"""
