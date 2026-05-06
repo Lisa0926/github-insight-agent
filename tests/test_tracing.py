@@ -46,7 +46,7 @@ class TestTraceDecoratorPassthrough:
         async def greet(name: str) -> str:
             return f"Hello, {name}"
 
-        result = asyncio.get_event_loop().run_until_complete(greet("World"))
+        result = asyncio.run(greet("World"))
         assert result == "Hello, World"
 
     def test_method_traced(self):
