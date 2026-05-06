@@ -1068,95 +1068,39 @@ Respond with JSON ONLY:
 
         return f"[{bar}] {percentage_display}%"
 
-    def _generate_overall_assessment(
-        self,
-        analysis_results: List[Dict[str, Any]],
-    ) -> str:
-        """Generate overall assessment section"""
-        # Extract all recommendations
-        recommendations = []
+    def _count_recommendations(self, analysis_results: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Count recommendation types from analysis results."""
+        counts = {"recommend": 0, "consider": 0, "avoid": 0}
         for result in analysis_results:
             analysis = result.get("analysis")
-            if analysis and isinstance(analysis, dict):
+            if isinstance(analysis, dict):
                 rec = analysis.get("recommendation", "")
-                if rec:
-                    recommendations.append(rec)
+                if "recommend" in rec.lower():
+                    counts["recommend"] += 1
+                elif "avoid" in rec.lower():
+                    counts["avoid"] += 1
+                else:
+                    counts["consider"] += 1
+        return counts
 
-        # Extract maturity assessments
-        maturities = []
+    def _collect_maturity_counts(self, analysis_results: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Collect maturity distribution counts."""
+        counts: Dict[str, int] = {}
         for result in analysis_results:
             analysis = result.get("analysis")
-            if analysis and isinstance(analysis, dict):
+            if isinstance(analysis, dict):
                 mat = analysis.get("maturity_assessment", "")
                 if mat:
-                    maturities.append(mat)
+                    mat_lower = mat.lower() if isinstance(mat, str) else str(mat)
+                    counts[mat_lower] = counts.get(mat_lower, 0) + 1
+        return counts
 
-        assessment_lines = [
-            "Based on the above analysis, here is the overall assessment:",
-            "",
-            "#### Recommendation Statistics",
-        ]
-
-        # Count recommendation types
-        rec_counts = {"recommend": 0, "consider": 0, "avoid": 0}
-        for rec in recommendations:
-            rec_lower = rec.lower()
-            if "recommend" in rec_lower:
-                rec_counts["recommend"] += 1
-            elif "avoid" in rec_lower:
-                rec_counts["avoid"] += 1
-            else:
-                rec_counts["consider"] += 1
-
-        assessment_lines.extend([
-            f"- 🟢 Recommend: {rec_counts['recommend']}",
-            f"- 🟡 Consider: {rec_counts['consider']}",
-            f"- 🔴 Avoid: {rec_counts['avoid']}",
-        ])
-
-        # Maturity distribution
-        if maturities:
-            mat_counts = {}
-            for mat in maturities:
-                mat_lower = mat.lower() if isinstance(mat, str) else str(mat)
-                mat_counts[mat_lower] = mat_counts.get(mat_lower, 0) + 1
-            mat_display = {
-                "mature": "🔵 Mature",
-                "stable": "🟢 Stable",
-                "beta": "🟠 Beta",
-                "early": "🟡 Early",
-            }
-            assessment_lines.extend([
-                "",
-                "#### Maturity Distribution",
-            ])
-            for mat_key, mat_label in mat_display.items():
-                count = mat_counts.get(mat_key, 0)
-                if count > 0:
-                    assessment_lines.append(f"- {mat_label}: {count}")
-
-        # Rank by Stars
-        assessment_lines.extend([
-            "",
-            "#### Overall Ranking",
-            "(Based on Star count, maturity, and recommendation)",
-            "",
-        ])
-
-        for i, result in enumerate(analysis_results, 1):
-            project = result.get("project", "Unknown")
-            stars = result.get("stars", 0)
-            analysis = result.get("analysis", {})
-            maturity = analysis.get("maturity_assessment", "unknown")
-            rec = analysis.get("recommendation", "")
-            rec_label = "✅" if "recommend" in rec.lower() else ("❌" if "avoid" in rec.lower() else "⚠️")
-            assessment_lines.append(
-                f"{i}. **{project}** - ⭐ {stars:,} | {maturity} | {rec_label}"
-            )
-
-        # Tech stack analysis
-        languages = {}
-        frameworks = {}
+    def _collect_tech_data(
+        self, analysis_results: List[Dict[str, Any]],
+    ) -> tuple:
+        """Collect language and framework distribution."""
+        languages: Dict[str, int] = {}
+        frameworks: Dict[str, int] = {}
         for result in analysis_results:
             analysis = result.get("analysis", {})
             tech = analysis.get("tech_stack", {})
@@ -1166,22 +1110,84 @@ Respond with JSON ONLY:
                     languages[lang] = languages.get(lang, 0) + 1
                 for fw in tech.get("frameworks", []):
                     frameworks[fw] = frameworks.get(fw, 0) + 1
+        return languages, frameworks
 
+    def _format_recommendation_section(self, rec_counts: Dict[str, int]) -> List[str]:
+        """Format recommendation statistics section."""
+        return [
+            "- 🟢 Recommend: {}".format(rec_counts['recommend']),
+            "- 🟡 Consider: {}".format(rec_counts['consider']),
+            "- 🔴 Avoid: {}".format(rec_counts['avoid']),
+        ]
+
+    def _format_maturity_section(self, mat_counts: Dict[str, int]) -> List[str]:
+        """Format maturity distribution section."""
+        mat_display = {
+            "mature": "🔵 Mature",
+            "stable": "🟢 Stable",
+            "beta": "🟠 Beta",
+            "early": "🟡 Early",
+        }
+        lines = ["", "#### Maturity Distribution"]
+        for mat_key, mat_label in mat_display.items():
+            count = mat_counts.get(mat_key, 0)
+            if count > 0:
+                lines.append(f"- {mat_label}: {count}")
+        return lines
+
+    def _format_ranking_section(self, analysis_results: List[Dict[str, Any]]) -> List[str]:
+        """Format overall ranking section."""
+        lines = ["", "#### Overall Ranking",
+                 "(Based on Star count, maturity, and recommendation)", ""]
+        for i, result in enumerate(analysis_results, 1):
+            project = result.get("project", "Unknown")
+            stars = result.get("stars", 0)
+            analysis = result.get("analysis", {})
+            maturity = analysis.get("maturity_assessment", "unknown")
+            rec = analysis.get("recommendation", "")
+            rec_label = "✅" if "recommend" in rec.lower() else (
+                "❌" if "avoid" in rec.lower() else "⚠️")
+            lines.append(f"{i}. **{project}** - ⭐ {stars:,} | {maturity} | {rec_label}")
+        return lines
+
+    def _format_tech_section(
+        self, languages: Dict[str, int], frameworks: Dict[str, int],
+    ) -> List[str]:
+        """Format technology ecosystem section."""
+        lines = []
         if languages:
-            assessment_lines.extend([
-                "",
-                "#### Technology Ecosystem",
-                "",
-                "**Programming Language Distribution**:",
-            ])
+            lines.extend(["", "#### Technology Ecosystem", "",
+                          "**Programming Language Distribution**:"])
             for lang, count in sorted(languages.items(), key=lambda x: x[1], reverse=True):
-                assessment_lines.append(f"- {lang}: {count} projects")
-
+                lines.append(f"- {lang}: {count} projects")
         if frameworks:
-            assessment_lines.append("")
-            assessment_lines.append("**Common Frameworks**:")
+            lines.append("")
+            lines.append("**Common Frameworks**:")
             for fw, count in sorted(frameworks.items(), key=lambda x: x[1], reverse=True)[:5]:
-                assessment_lines.append(f"- {fw} ({count})")
+                lines.append(f"- {fw} ({count})")
+        return lines
+
+    def _generate_overall_assessment(
+        self,
+        analysis_results: List[Dict[str, Any]],
+    ) -> str:
+        """Generate overall assessment section"""
+        rec_counts = self._count_recommendations(analysis_results)
+        mat_counts = self._collect_maturity_counts(analysis_results)
+        languages, frameworks = self._collect_tech_data(analysis_results)
+
+        assessment_lines = [
+            "Based on the above analysis, here is the overall assessment:",
+            "",
+            "#### Recommendation Statistics",
+        ]
+        assessment_lines.extend(self._format_recommendation_section(rec_counts))
+
+        if mat_counts:
+            assessment_lines.extend(self._format_maturity_section(mat_counts))
+
+        assessment_lines.extend(self._format_ranking_section(analysis_results))
+        assessment_lines.extend(self._format_tech_section(languages, frameworks))
 
         assessment_lines.extend([
             "",
@@ -1345,6 +1351,53 @@ No matching projects found. Please try:
 
         return None
 
+    def _execute_tool_action(self, action: str, params: dict) -> Optional[str]:
+        """Execute a tool action based on intent routing result."""
+        action_dispatch = {
+            "get_repo_info": lambda: self.researcher._execute_get_repo_info(params),
+            "search_repositories": lambda: self.researcher._execute_search(params),
+            "compare_repositories": lambda: self.researcher._execute_compare(params, analyst=self.analyst),
+            "analyze_project": lambda: self.researcher._execute_analyze_project(params, analyst=self.analyst),
+        }
+        handler = action_dispatch.get(action)
+        return handler() if handler else None
+
+    def _fallback_to_llm(self, user_query: str, context: str) -> str:
+        """Fallback to LLM chat with context when intent routing doesn't apply."""
+        repo_data = self._resolve_repo_query(user_query)
+        if repo_data:
+            context = f"{context}\n\n## 相关仓库数据\n{repo_data}"
+
+        model_wrapper = self.analyst._get_model_wrapper()
+        prompt = f"""请根据以下上下文回答用户的问题。
+
+{context}
+
+## 用户问题
+{user_query}
+
+请给出简洁、专业的回答。如果上下文中没有相关信息，请如实告知。"""
+
+        messages = [
+            {"name": "system", "content":
+             ReportGenerator._build_system_prompt("followup_system_prompt"),
+             "role": "system"},
+            {"name": "user", "content": prompt, "role": "user"},
+        ]
+
+        response = model_wrapper(messages=messages)
+        content = self.analyst._extract_response_text(response)
+        content = filter_sensitive_output(content)
+
+        logger.info(f"Followup answer generated: {len(content)} chars")
+
+        self.conversation.add_assistant_message(
+            content,
+            metadata={"type": "followup_response"},
+        )
+
+        return content
+
     def _answer_followup(
         self,
         user_query: str,
@@ -1356,84 +1409,20 @@ No matching projects found. Please try:
         Uses intent understanding: if the query requires a GitHub tool call,
         the researcher's LLM intent router handles it. Otherwise, falls back
         to plain LLM chat with context.
-
-        Args:
-            user_query: User question
-            context: Context information
-
-        Returns:
-            Assistant answer
         """
         try:
-            # Try intent understanding first
             intent = self.researcher._understand_intent(user_query)
             action = intent["action"]
             params = intent["params"]
 
-            # If it's a tool action, execute it
-            result = ""
-            if action == "get_repo_info":
-                result = self.researcher._execute_get_repo_info(params)
-            elif action == "search_repositories":
-                result = self.researcher._execute_search(params)
-            elif action == "compare_repositories":
-                result = self.researcher._execute_compare(
-                    params, analyst=self.analyst
-                )
-            elif action == "analyze_project":
-                result = self.researcher._execute_analyze_project(
-                    params, analyst=self.analyst
-                )
-            else:
-                result = None  # Signal to fall through to LLM chat
-
+            result = self._execute_tool_action(action, params)
             if result is not None:
                 return result
-            # For chat action, fall through to LLM with context
         except Exception as e:
             logger.warning(f"Intent routing failed: {e}, falling back to LLM chat")
 
-        # Fall back to LLM chat with context
         try:
-            # Try to resolve repo info for the followup question
-            repo_data = self._resolve_repo_query(user_query)
-            if repo_data:
-                context = f"{context}\n\n## 相关仓库数据\n{repo_data}"
-
-            model_wrapper = self.analyst._get_model_wrapper()
-
-            prompt = f"""请根据以下上下文回答用户的问题。
-
-{context}
-
-## 用户问题
-{user_query}
-
-请给出简洁、专业的回答。如果上下文中没有相关信息，请如实告知。"""
-
-            messages = [
-                {"name": "system", "content":
-                 ReportGenerator._build_system_prompt("followup_system_prompt"),
-                 "role": "system"},
-                {"name": "user", "content": prompt, "role": "user"},
-            ]
-
-            response = model_wrapper(messages=messages)
-            content = self.analyst._extract_response_text(response)
-
-            # Filter sensitive data from LLM output
-            content = filter_sensitive_output(content)
-
-            logger.info(f"Followup answer generated: {len(content)} chars")
-
-            # Record ReAct thinking process (optional)
-            self.conversation.add_assistant_message(
-                content,
-                metadata={"type": "followup_response"},
-            )
-
-            return content
-
+            return self._fallback_to_llm(user_query, context)
         except Exception as e:
             logger.error(f"Failed to generate followup answer: {e}")
             return f"抱歉，生成回答时出错：{e}"

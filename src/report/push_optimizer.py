@@ -24,59 +24,11 @@ class PushReportOptimizer:
         - 文本消息最大 2048 字符
         - 建议控制在 1500 字符以内，确保完整显示
         """
-        lines = self.full_report.split('\n')
-
-        # 提取关键部分
-        sections = self._extract_key_sections(lines)
-
-        # 构建精简报告
-        report_parts = []
-
-        # 标题
-        title = sections.get('title', 'GitHub 项目分析报告')
-        report_parts.append(f"📊 {title}")
-        report_parts.append("")
-
-        # 关键指标
-        metrics = sections.get('metrics', [])
-        if metrics:
-            report_parts.append("📈 关键指标")
-            for m in metrics:
-                report_parts.append(f"  • {m['label']}: {m['value']}")
-            report_parts.append("")
-
-        # 核心发现
-        findings = sections.get('findings', [])
-        if findings:
-            report_parts.append("💡 核心发现")
-            for i, finding in enumerate(findings[:3], 1):  # 最多取 3 条
-                report_parts.append(f"  {i}. {finding}")
-            report_parts.append("")
-
-        # 竞品动态（如果有）
-        competitors = sections.get('competitors', [])
-        if competitors:
-            report_parts.append("🔥 竞品动态")
-            for comp in competitors[:2]:  # 最多取 2 条
-                report_parts.append(f"  • {comp}")
-            report_parts.append("")
-
-        # 行动建议
-        actions = sections.get('actions', [])
-        if actions:
-            report_parts.append("📋 行动建议")
-            for i, action in enumerate(actions[:3], 1):  # 最多取 3 条
-                report_parts.append(f"  {i}. {action}")
-            report_parts.append("")
-
-        # 完整报告链接（如果有 HTML 版本）
-        if sections.get('html_url'):
-            report_parts.append(f"📄 查看完整报告: {sections['html_url']}")
-
-        # 拼接并截断
+        sections = self._extract_key_sections()
+        report_parts = ["\U0001f4ca " + sections.get('title', 'GitHub 项目分析报告'), ""]
+        report_parts.extend(self._build_wechat_sections(sections))
         report = '\n'.join(report_parts)
 
-        # 确保不超过最大长度
         if len(report) > max_length:
             report = report[:max_length - 3] + "..."
 
@@ -88,54 +40,9 @@ class PushReportOptimizer:
 
         飞书支持更丰富的 Markdown 格式，但仍需控制长度
         """
-        lines = self.full_report.split('\n')
-        sections = self._extract_key_sections(lines)
-
-        report_parts = []
-
-        # 标题
-        title = sections.get('title', 'GitHub 项目分析报告')
-        report_parts.append(f"**{title}**")
-        report_parts.append("")
-
-        # 关键指标（用表格形式）
-        metrics = sections.get('metrics', [])
-        if metrics:
-            report_parts.append("**📈 关键指标**")
-            report_parts.append("| 指标 | 数值 |")
-            report_parts.append("|------|------|")
-            for m in metrics:
-                report_parts.append(f"| {m['label']} | {m['value']} |")
-            report_parts.append("")
-
-        # 核心发现
-        findings = sections.get('findings', [])
-        if findings:
-            report_parts.append("**💡 核心发现**")
-            for finding in findings[:5]:  # 最多取 5 条
-                report_parts.append(f"• {finding}")
-            report_parts.append("")
-
-        # 竞品动态
-        competitors = sections.get('competitors', [])
-        if competitors:
-            report_parts.append("**🔥 竞品动态**")
-            for comp in competitors[:3]:  # 最多取 3 条
-                report_parts.append(f"• {comp}")
-            report_parts.append("")
-
-        # 行动建议
-        actions = sections.get('actions', [])
-        if actions:
-            report_parts.append("**📋 行动建议**")
-            for i, action in enumerate(actions[:5], 1):  # 最多取 5 条
-                report_parts.append(f"{i}. {action}")
-            report_parts.append("")
-
-        # 完整报告链接
-        if sections.get('html_url'):
-            report_parts.append(f"[📄 查看完整报告]({sections['html_url']})")
-
+        sections = self._extract_key_sections()
+        report_parts = ["**" + sections.get('title', 'GitHub 项目分析报告') + "**", ""]
+        report_parts.extend(self._build_feishu_sections(sections))
         report = '\n'.join(report_parts)
 
         if len(report) > max_length:
@@ -143,92 +50,151 @@ class PushReportOptimizer:
 
         return report
 
-    def _extract_key_sections(self, lines: list) -> dict:
+    def _build_wechat_sections(self, sections: dict) -> list:
+        """Build WeChat-formatted section parts from extracted sections."""
+        parts = []
+        if sections.get('metrics'):
+            parts.append("\U0001f4c8 关键指标")
+            for m in sections['metrics']:
+                parts.append(f"  • {m['label']}: {m['value']}")
+            parts.append("")
+
+        if sections.get('findings'):
+            parts.append("\U0001f4a1 核心发现")
+            for i, finding in enumerate(sections['findings'][:3], 1):
+                parts.append(f"  {i}. {finding}")
+            parts.append("")
+
+        if sections.get('competitors'):
+            parts.append("\U0001f525 竞品动态")
+            for comp in sections['competitors'][:2]:
+                parts.append(f"  • {comp}")
+            parts.append("")
+
+        if sections.get('actions'):
+            parts.append("\U0001f4cb 行动建议")
+            for i, action in enumerate(sections['actions'][:3], 1):
+                parts.append(f"  {i}. {action}")
+            parts.append("")
+
+        if sections.get('html_url'):
+            parts.append(f"\U0001f4c4 查看完整报告: {sections['html_url']}")
+
+        return parts
+
+    def _build_feishu_sections(self, sections: dict) -> list:
+        """Build Feishu-formatted section parts from extracted sections."""
+        parts = []
+        if sections.get('metrics'):
+            parts.append("**\U0001f4c8 关键指标**")
+            parts.append("| 指标 | 数值 |")
+            parts.append("|------|------|")
+            for m in sections['metrics']:
+                parts.append(f"| {m['label']} | {m['value']} |")
+            parts.append("")
+
+        if sections.get('findings'):
+            parts.append("**\U0001f4a1 核心发现**")
+            for finding in sections['findings'][:5]:
+                parts.append(f"• {finding}")
+            parts.append("")
+
+        if sections.get('competitors'):
+            parts.append("**\U0001f525 竞品动态**")
+            for comp in sections['competitors'][:3]:
+                parts.append(f"• {comp}")
+            parts.append("")
+
+        if sections.get('actions'):
+            parts.append("**\U0001f4cb 行动建议**")
+            for i, action in enumerate(sections['actions'][:5], 1):
+                parts.append(f"{i}. {action}")
+            parts.append("")
+
+        if sections.get('html_url'):
+            parts.append(f"[📄 查看完整报告]({sections['html_url']})")
+
+        return parts
+
+    def _extract_key_sections(self) -> dict:
         """提取报告中的关键部分"""
-        result = {
-            'title': '',
-            'metrics': [],
-            'findings': [],
-            'competitors': [],
-            'actions': [],
+        content = self.full_report
+        return {
+            'title': self._extract_title(content),
+            'metrics': self._extract_metrics(content),
+            'findings': self._extract_findings(content),
+            'competitors': self._extract_competitors(content),
+            'actions': self._extract_actions(content),
             'html_url': None,
         }
 
-        content = '\n'.join(lines)
-
-        # 提取标题
+    def _extract_title(self, content: str) -> str:
+        """Extract the title (first # heading)."""
         title_match = re.search(r'# (.+?)(?:\n|$)', content)
-        if title_match:
-            result['title'] = title_match.group(1).strip()
+        return title_match.group(1).strip() if title_match else ''
 
-        # 提取关键指标（寻找数字 + 描述的 pattern）
+    def _extract_metrics(self, content: str) -> list:
+        """Extract key metrics (numeric patterns with descriptions)."""
+        metrics = []
         metric_patterns = [
-            r'(\d+)\s*(?:个\s*)?测试.*?(\d+)\s*(?:个\s*)?通过',
-            r'(\d+)\s*条.*?规则',
-            r'(\d+)\s*个.*?项目',
-            r'(\d+)\s*\+\s*(\d+)',  # 如 "176 +18"
+            (r'(\d+)\s*(?:个\s*)?测试.*?(\d+)\s*(?:个\s*)?通过', '测试用例',
+             lambda g: f"{g[0]} 个（{g[1]} 通过）"),
+            (r'(\d+)\s*条.*?规则', '安全规则',
+             lambda g: f"{g[0]} 条"),
+            (r'(\d+)\s*\+\s*(\d+)', '代码变更',
+             lambda g: f"+{g[0]} -{g[1]}"),
         ]
 
-        for pattern in metric_patterns:
-            matches = re.finditer(pattern, content)
-            for match in matches:
-                groups = match.groups()
-                if len(groups) == 2:
-                    if '测试' in match.group(0):
-                        result['metrics'].append({
-                            'label': '测试用例',
-                            'value': f"{groups[0]} 个（{groups[1]} 通过）"
-                        })
-                    elif '+' in match.group(0):
-                        result['metrics'].append({
-                            'label': '代码变更',
-                            'value': f"+{groups[0]} -{groups[1]}"
-                        })
-                elif len(groups) == 1:
-                    if '规则' in match.group(0):
-                        result['metrics'].append({
-                            'label': '安全规则',
-                            'value': f"{groups[0]} 条"
-                        })
+        for item in metric_patterns:
+            if len(item) == 3:
+                pattern, label, fmt_value = item
+                matches = re.finditer(pattern, content)
+                for match in matches:
+                    groups = match.groups()
+                    if len(groups) == item[0].count('(') + 1:
+                        metrics.append({'label': label, 'value': fmt_value(groups)})
+        return metrics
 
-        # 提取核心发现（寻找"总结"、"发现"、"洞察"等关键词后的内容）
-        finding_keywords = ['总结', '发现', '洞察', '结论']
-        for keyword in finding_keywords:
+    def _extract_findings(self, content: str) -> list:
+        """Extract core findings from summary/discovery sections."""
+        findings = []
+        for keyword in ['总结', '发现', '洞察', '结论']:
             pattern = rf'##? .*?{keyword}.*?\n(.*?)(?=\n##? |\Z)'
             match = re.search(pattern, content, re.DOTALL)
             if match:
-                finding_text = match.group(1).strip()
-                # 拆分为单独的发现
-                for line in finding_text.split('\n'):
+                for line in match.group(1).strip().split('\n'):
                     line = line.strip().lstrip('•-1234567890. ')
                     if line and len(line) > 10:
-                        result['findings'].append(line)
+                        findings.append(line)
+        return findings
 
-        # 提取竞品动态
+    def _extract_competitors(self, content: str) -> list:
+        """Extract competitor dynamics from competitor section."""
+        competitors = []
         competitor_section = re.search(
             r'##? .?竞品.*?\n(.*?)(?=\n##? |\Z)',
-            content, re.DOTALL
+            content, re.DOTALL,
         )
         if competitor_section:
-            comp_text = competitor_section.group(1)
-            for line in comp_text.split('\n'):
+            comp_keywords = {'CodeRabbit', 'Qodo', 'Sonar', 'Copilot', 'Sweep'}
+            for line in competitor_section.group(1).split('\n'):
                 line = line.strip()
-                if line and any(kw in line for kw in ['CodeRabbit', 'Qodo', 'Sonar', 'Copilot', 'Sweep']):
-                    result['competitors'].append(line)
+                if line and any(kw in line for kw in comp_keywords):
+                    competitors.append(line)
+        return competitors
 
-        # 提取行动建议
-        action_keywords = ['行动', '建议', '待办', 'TODO', '下一步']
-        for keyword in action_keywords:
+    def _extract_actions(self, content: str) -> list:
+        """Extract action items from action/suggestion sections."""
+        actions = []
+        for keyword in ['行动', '建议', '待办', 'TODO', '下一步']:
             pattern = rf'##? .?{keyword}.*?\n(.*?)(?=\n##? |\Z)'
             match = re.search(pattern, content, re.DOTALL)
             if match:
-                action_text = match.group(1).strip()
-                for line in action_text.split('\n'):
+                for line in match.group(1).strip().split('\n'):
                     line = line.strip().lstrip('•-1234567890. ')
                     if line and len(line) > 10:
-                        result['actions'].append(line)
-
-        return result
+                        actions.append(line)
+        return actions
 
 
 # ===========================================

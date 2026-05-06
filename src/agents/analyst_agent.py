@@ -393,6 +393,61 @@ class AnalystAgent(GiaAgentBase):
             "parse_error": "JSON decode failed and Python-style dict fallback also failed",
         }
 
+    def _check_completeness(self, analysis: Dict[str, Any]) -> List[str]:
+        """Check if all required fields are present."""
+        required_fields = [
+            "core_function", "tech_stack", "architecture_pattern",
+            "pain_points_solved", "unique_value", "risk_flags",
+            "suitability_score", "maturity_assessment", "recommendation",
+        ]
+        return [f for f in required_fields if f not in analysis or not analysis[f]]
+
+    def _check_consistency(
+        self, analysis: Dict[str, Any], issues: List[str],
+    ) -> bool:
+        """Check suitability score vs score breakdown consistency."""
+        breakdown = analysis.get("score_breakdown", {})
+        suitability = analysis.get("suitability_score")
+        if breakdown and suitability is not None:
+            avg_breakdown = sum(breakdown.values()) / len(breakdown) if breakdown else 0
+            if abs(suitability - avg_breakdown) > 0.4:
+                issues.append(
+                    f"Suitability ({suitability}) deviates significantly from breakdown avg ({avg_breakdown:.2f})"
+                )
+                return False
+        return True
+
+    def _check_fact_grounding(
+        self, analysis: Dict[str, Any], project_info: str, issues: List[str],
+    ) -> bool:
+        """Check tech stack language matches project language."""
+        ts = analysis.get("tech_stack")
+        if isinstance(ts, dict):
+            ts_lang = ts.get("language", "")
+            lang_match = re.search(r"- 编程语言：(.+)", project_info)
+            if lang_match:
+                actual_lang = lang_match.group(1).strip()
+                if ts_lang and actual_lang and ts_lang.lower() != actual_lang.lower():
+                    issues.append(
+                        f"Tech stack language ({ts_lang}) doesn't match project language ({actual_lang})"
+                    )
+                    return False
+        return True
+
+    def _check_reasonableness(
+        self, analysis: Dict[str, Any], issues: List[str],
+    ) -> bool:
+        """Check maturity and recommendation make sense together."""
+        maturity = analysis.get("maturity_assessment", "")
+        recommendation = analysis.get("recommendation", "")
+        if maturity == "early" and recommendation:
+            if "推荐" in recommendation or "recommend" in recommendation.lower():
+                issues.append(
+                    "Early maturity project with strong positive recommendation — verify"
+                )
+                return False
+        return True
+
     def _reflect(
         self,
         analysis: Dict[str, Any],
@@ -402,101 +457,49 @@ class AnalystAgent(GiaAgentBase):
         """
         Reflection: self-validate analysis result and fix if needed.
 
-        Checks:
-        1. **Completeness**: All required fields present (core_function, tech_stack, etc.)
-        2. **Consistency**: Scores don't contradict each other (e.g., high suitability but low all subscores)
-        3. **Fact-grounding**: Key claims are supported by project info (stars, language match)
-        4. **Reasonableness**: Suitability score aligns with score breakdown
-
+        Checks completeness, consistency, fact-grounding, and reasonableness.
         If issues are found, attempts to fix via a single LLM call.
-
-        Args:
-            analysis: Raw analysis result from LLM
-            project_info: Project info string used for fact-checking
-            max_retries: Max number of retry attempts (default 1 to control cost)
-
-        Returns:
-            Analysis result with reflection metadata added
         """
-        reflection_result = {
+        issues: List[str] = []
+        reflection_result: Dict[str, Any] = {
             "completeness": False,
             "consistency": False,
             "fact_grounded": False,
             "reasonable": False,
-            "issues": [],
+            "issues": issues,
         }
 
         # Check 1: Completeness
-        required_fields = [
-            "core_function", "tech_stack", "architecture_pattern",
-            "pain_points_solved", "unique_value", "risk_flags",
-            "suitability_score", "maturity_assessment", "recommendation",
-        ]
-        missing = [f for f in required_fields if f not in analysis or not analysis[f]]
+        missing = self._check_completeness(analysis)
         reflection_result["completeness"] = len(missing) == 0
         if missing:
-            reflection_result["issues"].append(f"Missing fields: {', '.join(missing)}")
+            issues.append(f"Missing fields: {', '.join(missing)}")
 
-        # Check 2: Consistency - suitability score vs score breakdown
-        breakdown = analysis.get("score_breakdown", {})
-        suitability = analysis.get("suitability_score")
+        # Check 2: Consistency
+        reflection_result["consistency"] = self._check_consistency(analysis, issues)
 
-        if breakdown and suitability is not None:
-            avg_breakdown = sum(breakdown.values()) / len(breakdown) if breakdown else 0
-            # If suitability deviates too much from average breakdown, flag it
-            if abs(suitability - avg_breakdown) > 0.4:
-                reflection_result["issues"].append(
-                    f"Suitability ({suitability}) deviates significantly from breakdown avg ({avg_breakdown:.2f})"
-                )
-        reflection_result["consistency"] = len([
-            i for i in reflection_result["issues"] if "deviates" in i
-        ]) == 0
+        # Check 3: Fact-grounding
+        reflection_result["fact_grounded"] = self._check_fact_grounding(
+            analysis, project_info, issues,
+        )
 
-        # Check 3: Fact-grounding - language and basic facts match
-        if analysis.get("tech_stack"):
-            ts = analysis["tech_stack"]
-            if isinstance(ts, dict):
-                ts_lang = ts.get("language", "")
-                # Extract language from project_info
-                lang_match = re.search(r"- 编程语言：(.+)", project_info)
-                if lang_match:
-                    actual_lang = lang_match.group(1).strip()
-                    if ts_lang and actual_lang and ts_lang.lower() != actual_lang.lower():
-                        reflection_result["issues"].append(
-                            f"Tech stack language ({ts_lang}) doesn't match project language ({actual_lang})"
-                        )
-        reflection_result["fact_grounded"] = len([
-            i for i in reflection_result["issues"] if "language" in i.lower() or "match" in i.lower()
-        ]) == 0
-
-        # Check 4: Reasonableness - maturity and recommendation make sense
-        maturity = analysis.get("maturity_assessment", "")
-        recommendation = analysis.get("recommendation", "")
-        if maturity and recommendation:
-            rec_lower = recommendation.lower()
-            # If maturity is "early" but recommendation is strongly positive, flag
-            if maturity == "early" and ("推荐" in recommendation or "recommend" in rec_lower):
-                reflection_result["issues"].append(
-                    "Early maturity project with strong positive recommendation — verify"
-                )
-        reflection_result["reasonable"] = len([
-            i for i in reflection_result["issues"] if "maturity" in i.lower() or "recommendation" in i.lower()
-        ]) == 0
+        # Check 4: Reasonableness
+        reflection_result["reasonable"] = self._check_reasonableness(analysis, issues)
 
         # If any checks failed, try to fix via LLM (up to max_retries)
-        if not all([
+        all_passed = all([
             reflection_result["completeness"],
             reflection_result["consistency"],
             reflection_result["fact_grounded"],
             reflection_result["reasonable"],
-        ]) and max_retries > 0:
+        ])
+        if not all_passed and max_retries > 0:
             logger.info(
-                f"Reflection found {len(reflection_result['issues'])} issue(s), attempting fix"
+                f"Reflection found {len(issues)} issue(s), attempting fix"
             )
-            fixed_analysis = self._fix_analysis(analysis, reflection_result["issues"], project_info)
+            fixed_analysis = self._fix_analysis(analysis, issues, project_info)
             if fixed_analysis:
                 analysis = fixed_analysis
-                # Re-run checks on fixed result
                 reflection_result["fixed"] = True
                 logger.info("Reflection fix applied successfully")
             else:
