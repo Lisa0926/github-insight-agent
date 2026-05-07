@@ -17,6 +17,7 @@ import re
 from datetime import datetime, timedelta
 
 from agentscope.message import Msg
+from agentscope.message._message_block import ToolUseBlock
 
 from src.core.config_manager import ConfigManager
 from src.core.guardrails import sanitize_user_input, filter_sensitive_output, circuit_breaker_guard
@@ -309,6 +310,396 @@ class ResearcherAgent(GiaAgentBase):
             f"## 可用工具（动态注册）\n\n{tools_section}\n\n"
         )
         return dynamic_prompt
+
+    # ============================================================
+    # Native Function Calling (S3-P1)
+    # ============================================================
+
+    MAX_NATIVE_TOOL_CALLS = 5
+
+    def _get_tool_schemas(self) -> List[Dict[str, Any]]:
+        """Get OpenAI-format tool schemas from the toolkit."""
+        if self.toolkit is None:
+            return []
+        return self.toolkit.get_json_schemas()
+
+    def _call_with_native_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        max_tokens: int = 7000,
+    ) -> Dict[str, Any]:
+        """
+        Call the model with native function calling.
+
+        Args:
+            messages: Message list (system + history + user)
+            max_tokens: Token budget
+
+        Returns:
+            Dict with 'text' (str, optional) and 'tool_calls' (list, optional)
+        """
+        schemas = self._get_tool_schemas()
+        model_wrapper = self._get_model_wrapper()
+
+        response = model_wrapper(
+            messages=messages,
+            max_tokens=2048,
+            temperature=0.3,
+            tools=schemas if schemas else None,
+        )
+
+        # Extract tool calls from response
+        tool_calls = model_wrapper.extract_tool_calls(response)
+
+        # Extract text content
+        content = self._extract_response_text(response)
+
+        if tool_calls:
+            return {"text": None, "tool_calls": tool_calls}
+        else:
+            return {"text": content, "tool_calls": []}
+
+    def _execute_tool_call(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute a single tool call from native function calling.
+
+        Routes tool names to the appropriate execution method.
+
+        Args:
+            tool_call: Dict with 'id', 'name', 'input' keys
+
+        Returns:
+            Dict with 'tool_call_id', 'name', 'result' keys
+        """
+        tool_name = tool_call.get("name", "")
+        params = tool_call.get("input", {})
+        tool_call_id = tool_call.get("id", "")
+
+        logger.info(f"Executing native tool call: {tool_name} with params={params}")
+
+        try:
+            result_text = self._dispatch_tool(tool_name, params)
+            return {
+                "tool_call_id": tool_call_id,
+                "name": tool_name,
+                "result": result_text,
+            }
+        except Exception as e:
+            logger.error(f"Tool call {tool_name} failed: {e}")
+            return {
+                "tool_call_id": tool_call_id,
+                "name": tool_name,
+                "result": f"Error: {e}",
+            }
+
+    def _dispatch_tool(self, tool_name: str, params: Dict[str, Any]) -> str:
+        """
+        Dispatch a tool call to the appropriate handler.
+
+        Maps toolkit tool names to execution methods.
+        """
+        # GitHub tool group
+        if tool_name == "search_repositories":
+            query = params.get("query", "")
+            sort = params.get("sort", "stars")
+            order = params.get("order", "desc")
+            per_page = params.get("per_page", params.get("limit", 5))
+            time_range_days = params.get("time_range_days", 0)
+
+            if time_range_days and time_range_days > 0:
+                start_date = (
+                    datetime.now() - timedelta(days=time_range_days)
+                ).strftime("%Y-%m-%d")
+                end_date = datetime.now().strftime("%Y-%m-%d")
+                query = f"created:{start_date}..{end_date} {query}"
+
+            repos = self.github_tool.search_repositories(
+                query=query, sort=sort, order=order, per_page=min(per_page, 100)
+            )
+            return self._format_search_results(repos, query, per_page)
+
+        elif tool_name == "get_repo_info":
+            owner = params.get("owner", "")
+            repo = params.get("repo", "")
+            return self._execute_get_repo_info({"owner": owner, "repo": repo})
+
+        elif tool_name == "get_readme":
+            owner = params.get("owner", "")
+            repo = params.get("repo", "")
+            readme = self.github_tool.get_readme(owner, repo)
+            return self.github_tool.clean_readme_text(readme)[:5000]
+
+        elif tool_name == "get_project_summary":
+            owner = params.get("owner", "")
+            repo = params.get("repo", "")
+            summary = self.github_tool.get_project_summary(
+                owner, repo, max_readme_length=params.get("max_readme_length", 3000)
+            )
+            lines = [
+                f"**{summary['full_name']}**",
+                f"Stars: {summary['stars']:,} | Forks: {summary['forks']:,}",
+                f"Language: {summary['language']}",
+                f"Description: {summary['description']}",
+            ]
+            return "\n".join(lines)
+
+        elif tool_name == "check_rate_limit":
+            rate_info = self.github_tool.check_rate_limit()
+            if "error" in rate_info:
+                return f"Rate limit error: {rate_info['error']}"
+            return (
+                f"Limit: {rate_info['limit']:,}/hr | "
+                f"Remaining: {rate_info['remaining']:,} | "
+                f"Authenticated: {'Yes' if rate_info.get('authenticated') else 'No'}"
+            )
+
+        # Orphan tool groups
+        elif tool_name == "evaluate_code_quality":
+            import asyncio
+            from src.tools.code_quality_tool import evaluate_code_quality as _eval_cq
+            repo_info_json = params.get("repo_info_json", "{}")
+            result = asyncio.get_event_loop().run_until_complete(
+                _eval_cq(
+                    params.get("readme_content", ""),
+                    json.loads(repo_info_json) if isinstance(repo_info_json, str) else repo_info_json,
+                    use_llm=params.get("use_llm", True),
+                )
+            )
+            if result.success:
+                data = result.data
+                if isinstance(data, dict) and "report_text" in data:
+                    return data["report_text"]
+                return str(data)
+            return f"Error: {result.error_message}"
+
+        elif tool_name == "scan_security_code":
+            import asyncio
+            from src.tools.owasp_security_rules import scan_security as _scan_sec
+            result = asyncio.get_event_loop().run_until_complete(
+                _scan_sec(params.get("file_path", ""), params.get("code_content", ""))
+            )
+            if result.success:
+                data = result.data
+                if isinstance(data, dict) and "report_text" in data:
+                    return data["report_text"]
+                return str(data)
+            return f"Error: {result.error_message}"
+
+        elif tool_name == "review_code_changes":
+            import asyncio
+            from src.tools.pr_review_tool import review_pull_request as _review_pr
+            result = asyncio.get_event_loop().run_until_complete(
+                _review_pr(
+                    params.get("pr_title", ""),
+                    params.get("pr_description", ""),
+                    params.get("diff_content", ""),
+                    use_llm=params.get("use_llm", True),
+                )
+            )
+            if result.success:
+                data = result.data
+                if isinstance(data, dict) and "report_text" in data:
+                    return data["report_text"]
+                return str(data)
+            return f"Error: {result.error_message}"
+
+        # Fallback: try direct method call on github_tool
+        elif hasattr(self.github_tool, tool_name):
+            method = getattr(self.github_tool, tool_name)
+            if callable(method):
+                result = method(**params)
+                return str(result)
+
+        # Unknown tool
+        return f"Unknown tool: {tool_name}"
+
+    def _format_search_results(
+        self, repos: List[Any], query: str, limit: int
+    ) -> str:
+        """Format search results as markdown."""
+        if not repos:
+            return f"没有找到与「{query}」相关的仓库。"
+
+        lines = [
+            f"## 搜索结果：{query}",
+            "",
+            f"找到 **{len(repos)}** 个相关仓库：",
+            "",
+            "| # | 仓库 | Stars | 语言 | 简介 |",
+            "|---|------|-------|------|------|",
+        ]
+        for i, repo in enumerate(repos[:limit], 1):
+            desc = repo.description or "*无描述*"
+            if len(desc) > 60:
+                desc = desc[:57] + "..."
+            lines.append(
+                f"| {i} | **[{repo.full_name}]({repo.html_url})** "
+                f"| {repo.stargazers_count:,} | "
+                f"{repo.language or 'N/A'} | {desc} |"
+            )
+        return "\n".join(lines)
+
+    def reply_with_native_tools(
+        self,
+        user_query: str,
+        analyst=None,
+    ) -> str:
+        """
+        Respond to user query using AgentScope native function calling.
+
+        Flow:
+        1. Build messages (system + history + user)
+        2. Call model with tool schemas
+        3. If model returns tool calls, execute them and loop
+        4. If model returns text, return it
+        5. Max MAX_NATIVE_TOOL_CALLS iterations
+
+        Args:
+            user_query: User's natural language query
+            analyst: Optional AnalystAgent (ignored in native mode, kept for compat)
+
+        Returns:
+            Formatted response text
+        """
+        schemas = self._get_tool_schemas()
+        if not schemas:
+            # No toolkit available, fall back to prompt-based intent
+            logger.info("No toolkit schemas, falling back to prompt-based intent")
+            return self._reply_with_prompt_based_intent(user_query, analyst=analyst)
+
+        # Build messages
+        system_prompt = self.system_prompt
+        history = self.memory.get_messages_for_prompt()
+
+        # Build message list for the model
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add history (last 20 messages to control token count)
+        for msg in history[-20:]:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role in ("user", "assistant", "system"):
+                messages.append({"role": role, "content": content})
+
+        messages.append({"role": "user", "content": user_query})
+
+        # Tool call loop
+        for iteration in range(self.MAX_NATIVE_TOOL_CALLS):
+            result = self._call_with_native_tools(messages)
+
+            # If text response, we're done
+            if result.get("text"):
+                return filter_sensitive_output(result["text"])
+
+            # If tool calls, execute them and continue
+            tool_calls = result.get("tool_calls", [])
+            if tool_calls:
+                # Add assistant message with tool calls
+                tool_call_blocks = []
+                for tc in tool_calls:
+                    tool_call_blocks.append({
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "input": tc["input"],
+                    })
+                messages.append({
+                    "role": "assistant",
+                    "content": tool_call_blocks,
+                })
+
+                # Execute each tool call
+                for tc in tool_calls:
+                    tool_result = self._execute_tool_call(tc)
+
+                    # Add tool result to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_result["tool_call_id"],
+                        "content": tool_result["result"],
+                    })
+
+                    logger.info(
+                        f"Tool call result ({tool_result['name']}): "
+                        f"{len(str(tool_result['result']))} chars"
+                    )
+
+                continue
+
+            # No text and no tool calls — fallback to plain LLM call
+            logger.warning("Model returned neither text nor tool calls")
+            return self._call_llm(user_query)
+
+        # Exceeded max iterations — generate final summary
+        messages.append({
+            "role": "user",
+            "content": "基于以上工具调用结果，给出简洁的回答。",
+        })
+        result = self._call_with_native_tools(messages)
+        if result.get("text"):
+            return filter_sensitive_output(result["text"])
+        return "处理完成，但未能生成最终回答。"
+
+    def _reply_with_prompt_based_intent(
+        self, user_query: str, analyst=None
+    ) -> str:
+        """
+        Fallback: respond using prompt-based intent understanding.
+
+        This method preserves the original _understand_intent() logic
+        for when the toolkit is unavailable.
+        """
+        logger.info(f"Received query (prompt-based): {user_query}")
+
+        # Step 1: Check if this is a direct repo lookup
+        repo_name = self._is_repo_lookup_query(user_query)
+        if repo_name:
+            repo_result = self._resolve_repo_by_name(repo_name)
+            if repo_result:
+                return repo_result
+
+        # Step 2: Use LLM to understand intent
+        intent = self._understand_intent(user_query)
+        action = intent["action"]
+        params = intent["params"]
+
+        logger.info(f"Executing action: {action}")
+
+        # Step 3: Route to appropriate handler
+        result = None
+        success = False
+        result_count = 0
+
+        if action == "search_repositories":
+            result = self._execute_search(params)
+            success = result is not None and "搜索失败" not in result
+            result_count = params.get("limit", 5)
+        elif action == "get_repo_info":
+            result = self._execute_get_repo_info(params)
+            success = result is not None and "未找到" not in result
+        elif action == "analyze_project":
+            result = self._execute_analyze_project(params, analyst=analyst)
+            success = result is not None and "失败" not in result
+        elif action == "compare_repositories":
+            result = self._execute_compare(params, analyst=analyst)
+            success = result is not None
+        elif action == "chat":
+            result = self._call_llm(user_query)
+            success = True
+        else:
+            logger.warning(f"Unknown action: {action}")
+            result = self._call_llm(user_query)
+            success = True
+
+        # Track researcher KPIs
+        self.kpi_tracker.track_researcher_kpis(
+            intent_action=action,
+            intent_params=params,
+            success=success,
+            result_count=result_count,
+        )
+
+        return result
 
     def _calculate_trend_score(self, repo) -> float:
         """
@@ -827,10 +1218,9 @@ class ResearcherAgent(GiaAgentBase):
 
     def reply_to_message(self, user_query: str, analyst=None) -> str:
         """
-        Respond to user query using LLM intent understanding.
+        Respond to user query using native function calling.
 
-        This is the main entry point. The LLM understands the natural
-        language query, selects the right tool, and generates parameters.
+        Falls back to prompt-based intent understanding when toolkit is unavailable.
 
         Args:
             user_query: User's natural language query
@@ -845,56 +1235,12 @@ class ResearcherAgent(GiaAgentBase):
             logger.warning(f"Input blocked: {e}")
             return f"⚠️ {e}"
 
-        # Step 1: Check if this is a direct repo lookup (e.g. "langchain", "langchain/langchain")
-        repo_name = self._is_repo_lookup_query(user_query)
-        if repo_name:
-            repo_result = self._resolve_repo_by_name(repo_name)
-            if repo_result:
-                logger.info(f"Direct repo lookup matched: {repo_name}")
-                return repo_result
+        # Use native function calling if toolkit is available
+        if self.toolkit is not None:
+            return self.reply_with_native_tools(user_query, analyst=analyst)
 
-        # Step 2: Use LLM to understand intent
-        intent = self._understand_intent(user_query)
-        action = intent["action"]
-        params = intent["params"]
-
-        logger.info(f"Executing action: {action}")
-
-        # Step 2: Route to appropriate handler
-        result = None
-        success = False
-        result_count = 0
-
-        if action == "search_repositories":
-            result = self._execute_search(params)
-            success = result is not None and "搜索失败" not in result
-            result_count = params.get("limit", 5)
-        elif action == "get_repo_info":
-            result = self._execute_get_repo_info(params)
-            success = result is not None and "未找到" not in result
-        elif action == "analyze_project":
-            result = self._execute_analyze_project(params, analyst=analyst)
-            success = result is not None and "失败" not in result
-        elif action == "compare_repositories":
-            result = self._execute_compare(params, analyst=analyst)
-            success = result is not None
-        elif action == "chat":
-            result = self._call_llm(user_query)
-            success = True
-        else:
-            logger.warning(f"Unknown action: {action}")
-            result = self._call_llm(user_query)
-            success = True
-
-        # Track researcher KPIs
-        self.kpi_tracker.track_researcher_kpis(
-            intent_action=action,
-            intent_params=params,
-            success=success,
-            result_count=result_count,
-        )
-
-        return result
+        # Fallback to prompt-based intent understanding
+        return self._reply_with_prompt_based_intent(user_query, analyst=analyst)
 
     def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
         """Build message history with token budget management"""

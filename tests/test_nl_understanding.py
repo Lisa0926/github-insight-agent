@@ -245,6 +245,7 @@ class TestReplyToMessageRouting:
             agent.github_tool = MagicMock()
             agent.github_tool.get_repo_info.return_value = mock_repo_info
             agent.github_tool.search_repositories.return_value = [mock_repo_info]
+            agent.toolkit = None  # Force prompt-based intent fallback
 
         # _is_repo_lookup_query should detect "django" from the query
         # _resolve_repo_by_name should return the repo info
