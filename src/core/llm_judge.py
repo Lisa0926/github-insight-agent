@@ -6,6 +6,7 @@ Uses a lightweight scoring rubric approach:
 - Task: input + expected output criteria
 - Metric: scoring dimensions (relevance, accuracy, completeness, actionability)
 - Judge: LLM-powered scorer that evaluates outputs against rubrics
+- Multi-model: supports different judge models (GPT-4o, Claude, Qwen)
 
 Architecture:
 - LLMJudge: orchestrates evaluation (calls LLM once per task)
@@ -14,7 +15,7 @@ Architecture:
 """
 
 import json
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass
 
 from agentscope.evaluate import MetricBase, MetricResult, MetricType
@@ -356,3 +357,187 @@ class RuleBasedScorer:
             "accuracy": RuleBasedScorer.score_accuracy(output, expected_fields or []),
             "actionability": RuleBasedScorer.score_actionability(output),
         }
+
+
+# ---- Multi-Model Judge Support ----
+
+
+@dataclass
+class JudgeModelConfig:
+    """Configuration for a judge model."""
+
+    name: str
+    description: str
+    model_id: str
+    temperature: float = 0.0
+    max_tokens: int = 1024
+    # Some models may need different system prompt styles
+    system_prompt: Optional[str] = None
+    # Score normalization: maps model-specific range to 1-5
+    score_min: float = 1.0
+    score_max: float = 5.0
+
+
+# Pre-configured judge models
+JUDGE_MODELS: Dict[str, JudgeModelConfig] = {
+    "gpt-4o": JudgeModelConfig(
+        name="GPT-4o",
+        description="OpenAI GPT-4o — high-quality judge",
+        model_id="gpt-4o",
+    ),
+    "claude": JudgeModelConfig(
+        name="Claude",
+        description="Anthropic Claude — conservative judge",
+        model_id="claude-3-opus",
+    ),
+    "qwen": JudgeModelConfig(
+        name="Qwen",
+        description="Alibaba Qwen-Max — balanced judge",
+        model_id="qwen-max",
+    ),
+}
+
+
+class ModelScoreNormalizer:
+    """
+    Normalizes scores from different judge models to a common 1-5 range.
+
+    Some models have systematic biases (e.g., Claude tends to be more
+    conservative). This normalizer applies linear scaling to bring scores
+    to a common distribution.
+    """
+
+    # Empirically-derived normalization factors (can be tuned)
+    NORMALIZATION_MAP: Dict[str, Dict[str, float]] = {
+        "gpt-4o": {"slope": 1.0, "intercept": 0.0},    # Baseline
+        "claude": {"slope": 1.1, "intercept": 0.2},     # Slightly compressed → expand
+        "qwen": {"slope": 1.0, "intercept": -0.1},      # Slightly generous → shrink
+    }
+
+    @staticmethod
+    def normalize(score: float, model_key: str = "gpt-4o") -> float:
+        """Normalize a single score to 1-5 range."""
+        config = ModelScoreNormalizer.NORMALIZATION_MAP.get(model_key, {"slope": 1.0, "intercept": 0.0})
+        normalized = score * config["slope"] + config["intercept"]
+        return max(1.0, min(5.0, round(normalized, 2)))
+
+    @staticmethod
+    def normalize_scores(
+        scores: Dict[str, float],
+        model_key: str = "gpt-4o",
+    ) -> Dict[str, float]:
+        """Normalize all dimension scores."""
+        return {dim: ModelScoreNormalizer.normalize(s, model_key) for dim, s in scores.items()}
+
+    @staticmethod
+    def get_model_keys() -> List[str]:
+        """Return available model keys."""
+        return list(ModelScoreNormalizer.NORMALIZATION_MAP.keys())
+
+
+class MultiModelJudge:
+    """
+    Orchestrates scoring across multiple judge models.
+
+    Usage:
+        judge = MultiModelJudge()
+        results = judge.score_all(
+            user_input="Search Python web frameworks",
+            assistant_output="Found FastAPI, Django, Flask...",
+        )
+        # results["gpt-4o"] = {"weighted": 4.2, "dimensions": {...}}
+        # results["claude"] = {"weighted": 3.8, "dimensions": {...}}
+        # results["consensus"] = {"weighted": 4.0, "dimensions": {...}}
+    """
+
+    def __init__(
+        self,
+        model_fns: Optional[Dict[str, Callable]] = None,
+        rubric: Optional[List[ScoringDimension]] = None,
+    ):
+        """
+        Args:
+            model_fns: Dict mapping model key to model function.
+                e.g., {"gpt-4o": openai_fn, "claude": anthropic_fn}
+            rubric: Optional custom scoring rubric.
+        """
+        self.model_fns = model_fns or {}
+        self.rubric = rubric or DEFAULT_RUBRIC
+
+    def score_with_model(
+        self,
+        model_key: str,
+        user_input: str,
+        assistant_output: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Score with a single model, returning normalized scores."""
+        if model_key not in self.model_fns:
+            return None
+
+        model_fn = self.model_fns[model_key]
+        metric = LLMJudgeMetric(model_fn=model_fn, rubric=self.rubric)
+
+        import asyncio
+        from agentscope.evaluate._solution import SolutionOutput
+
+        solution = SolutionOutput(
+            success=True,
+            output=assistant_output,
+            trajectory=[],
+        )
+
+        try:
+            result = asyncio.get_event_loop().run_until_complete(
+                metric(solution, task_input=user_input)
+            )
+            # Parse dimension scores from message
+            import json
+            detail = json.loads(result.message)
+            dims = detail.get("dimensions", {})
+            normalized = ModelScoreNormalizer.normalize_scores(dims, model_key)
+            weighted = metric.compute_weighted_score(normalized)
+            return {
+                "model": model_key,
+                "raw_weighted": result.result,
+                "normalized_weighted": weighted,
+                "dimensions": dims,
+                "normalized_dimensions": normalized,
+                "reasoning": detail.get("reasoning", ""),
+            }
+        except Exception:
+            return None
+
+    def score_all(
+        self,
+        user_input: str,
+        assistant_output: str,
+    ) -> Dict[str, Any]:
+        """Score with all configured models and compute consensus."""
+        results: Dict[str, Any] = {}
+        weighted_scores: List[float] = []
+        dim_sums: Dict[str, float] = {}
+        dim_counts: Dict[str, int] = {}
+
+        for model_key in self.model_fns:
+            score = self.score_with_model(model_key, user_input, assistant_output)
+            if score:
+                results[model_key] = score
+                weighted_scores.append(score["normalized_weighted"])
+                for dim, s in score["normalized_dimensions"].items():
+                    dim_sums[dim] = dim_sums.get(dim, 0) + s
+                    dim_counts[dim] = dim_counts.get(dim, 0) + 1
+
+        if weighted_scores:
+            consensus_weighted = sum(weighted_scores) / len(weighted_scores)
+            consensus_dims = {
+                dim: round(dim_sums[dim] / dim_counts[dim], 2)
+                for dim in dim_sums
+            }
+            results["consensus"] = {
+                "model": "consensus",
+                "normalized_weighted": round(consensus_weighted, 2),
+                "dimensions": consensus_dims,
+                "model_count": len(weighted_scores),
+            }
+
+        return results

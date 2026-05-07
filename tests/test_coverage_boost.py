@@ -4,7 +4,6 @@
 import asyncio
 import json
 from unittest.mock import patch, MagicMock, AsyncMock
-from src.tools.github_toolkit import create_github_toolkit
 from src.tools.github_tool import GitHubTool
 from src.tools.owasp_security_rules import (
     OWASPRuleEngine, scan_security, SecurityComment, IssueCategory, IssueSeverity,
@@ -12,8 +11,7 @@ from src.tools.owasp_security_rules import (
 )
 from src.tools.pr_review_tool import (
     PRReviewer, _parse_diff, _format_report, CodeChange,
-    IssueSeverity as PRSeverity, IssueCategory as PRCategory,
-    ReviewComment, review_pull_request,
+    review_pull_request,
 )
 
 

@@ -120,8 +120,8 @@ def get_tti_segments() -> Dict[str, float]:
     events = sorted(ts.items(), key=lambda x: x[1])
     segments = {}
     for i in range(1, len(events)):
-        label = f"{events[i-1][0]}_to_{events[i][0]}"
-        segments[label] = round(events[i][1] - events[i-1][1], 3)
+        label = f"{events[i - 1][0]}_to_{events[i][0]}"
+        segments[label] = round(events[i][1] - events[i - 1][1], 3)
     return segments
 
 

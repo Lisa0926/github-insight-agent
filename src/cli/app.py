@@ -20,6 +20,7 @@ from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
 from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
 from src.core.guardrails import sanitize_user_input  # noqa: E402
+from src.core.guardrails import get_approval_manager  # noqa: E402
 from src.core.feedback import get_feedback_collector, FeedbackSession  # noqa: E402
 import agentscope  # noqa: E402
 from src.core.config_manager import ConfigManager  # noqa: E402
@@ -82,6 +83,23 @@ def _push_to_studio(sender: str, content: str, role: str = "assistant") -> None:
         push_to_studio(sender, content[:8000], role)
     except Exception:
         pass  # Graceful degradation - does not affect main flow
+
+
+def _approve_tool(prompt: str) -> bool:
+    """CLI callback for interactive tool approval.
+
+    Used as prompt_callback for HumanApprovalManager.
+    Shows a yes/no prompt via prompt_toolkit.
+    """
+    try:
+        answer = cli.get_input(prompt).strip().lower()
+        return answer in ("y", "yes", "是", "y\n")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+# Register HITL approval manager with CLI callback at module load
+get_approval_manager(prompt_callback=_approve_tool)
 
 
 def print_welcome():

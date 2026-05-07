@@ -15,6 +15,7 @@ Engineering requirements:
 """
 
 import base64
+import hashlib
 import os
 import re
 import time
@@ -26,6 +27,7 @@ from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
 from src.core.resilient_http import ResilientHTTPClient, RateLimitError
 from src.core.tool_base import BaseTool
+from src.core.span_attributes import set_span_attributes
 from src.types.schemas import GitHubRepo, GitHubSearchResult, ToolResponse
 
 # Import AgentScope tracing (graceful fallback if disabled)
@@ -257,6 +259,13 @@ class GitHubTool(BaseTool):
         search_result = GitHubSearchResult.from_api_response(response.data)
         logger.info(f"Found {search_result.total_count} repositories")
 
+        set_span_attributes({
+            "github.query_hash": hashlib.sha256(query.encode()).hexdigest()[:8],
+            "github.sort": sort,
+            "github.per_page": min(per_page, 100),
+            "github.result_count": search_result.total_count,
+        })
+
         return search_result.items
 
     @trace(name="github.get_readme")
@@ -293,6 +302,14 @@ class GitHubTool(BaseTool):
             content_base64 = response.data.get("content", "")
             content = base64.b64decode(content_base64).decode("utf-8")
             logger.info(f"README fetched successfully ({len(content)} chars)")
+
+            set_span_attributes({
+                "github.owner": owner,
+                "github.repo": repo,
+                "github.ref": ref,
+                "github.readme_length": len(content),
+            })
+
             return content
         except Exception as e:
             logger.error(f"Failed to decode README: {e}")
@@ -324,7 +341,16 @@ class GitHubTool(BaseTool):
                 raise ValueError(f"Repository '{owner}/{repo}' not found")
             raise RuntimeError(f"GitHub API error: {response.error_message}")
 
-        return GitHubRepo.from_api_response(response.data)
+        repo = GitHubRepo.from_api_response(response.data)
+
+        set_span_attributes({
+            "github.owner": owner,
+            "github.repo": repo,
+            "github.repo_language": repo.language,
+            "github.repo_stars": repo.stargazers_count,
+        })
+
+        return repo
 
     def check_rate_limit(self) -> Dict[str, Any]:
         """

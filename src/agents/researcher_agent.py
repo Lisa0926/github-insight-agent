@@ -17,14 +17,13 @@ import re
 from datetime import datetime, timedelta
 
 from agentscope.message import Msg
-from agentscope.message._message_block import ToolUseBlock
 
 from src.core.config_manager import ConfigManager
 from src.core.guardrails import sanitize_user_input, filter_sensitive_output, circuit_breaker_guard
 from src.core.kpi_tracker import KPITracker
 from src.core.logger import get_logger
 from src.core.studio_helper import StudioHelper, set_global_studio_config
-from src.core.tool_base import tools_to_prompt_text
+from src.core.span_attributes import set_span_attributes
 from src.tools.github_tool import GitHubTool
 from src.tools.github_toolkit import get_github_toolkit
 from src.agents.base_agent import GiaAgentBase
@@ -1059,6 +1058,14 @@ class ResearcherAgent(GiaAgentBase):
             }
 
             logger.info(f"Found {len(repos)} repositories")
+
+            set_span_attributes({
+                "researcher.query": query,
+                "researcher.search_query": search_query,
+                "researcher.result_count": len(repos),
+                "researcher.total_found": len(repos),
+            })
+
             return result
 
         except RuntimeError as e:

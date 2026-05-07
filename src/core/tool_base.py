@@ -8,7 +8,7 @@ for name, description, input schema, execution, and validation.
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.core.logger import get_logger
 

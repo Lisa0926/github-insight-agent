@@ -586,9 +586,9 @@ Respond with JSON ONLY:
         tech_stack = analysis_data.get("tech_stack", {})
 
         needs_deepening = (
-            len(pain_points) < 2 or
-            len(risk_flags) < 1 or
-            (isinstance(tech_stack, dict) and len(tech_stack.get("frameworks", [])) < 1)
+            len(pain_points) < 2
+            or len(risk_flags) < 1
+            or (isinstance(tech_stack, dict) and len(tech_stack.get("frameworks", [])) < 1)
         )
 
         if needs_deepening:

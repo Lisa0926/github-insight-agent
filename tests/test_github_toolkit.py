@@ -2,7 +2,6 @@
 """Tests for github_toolkit closure functions and adaptation layer."""
 
 from unittest.mock import patch, MagicMock
-import json
 
 from src.tools.github_toolkit import (
     create_github_toolkit,

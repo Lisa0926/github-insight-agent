@@ -11,15 +11,75 @@ Provides:
 4. Human-in-the-loop (confirmation for dangerous operations)
 """
 
+import hashlib
+import json
 import re
 import time
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from src.core.kpi_tracker import _load_role_kpi_config
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ============================================================
+# 0. Audit Logger (separate from app log)
+# ============================================================
+
+class _AuditLogger:
+    """Append-only JSONL audit logger for security events.
+
+    Writes structured records to logs/audit.log with rotation.
+    """
+
+    def __init__(self, log_dir: Optional[str] = None) -> None:
+        if log_dir is None:
+            base_dir = Path(__file__).parent.parent.parent
+            log_dir = str(base_dir / "logs")
+        self._log_path = Path(log_dir) / "audit.log"
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialized = False
+
+    def _ensure_init(self) -> None:
+        if self._initialized:
+            return
+        # Create file if not exists
+        if not self._log_path.exists():
+            self._log_path.touch()
+        self._initialized = True
+
+    def record(self, event: str, details: Dict[str, Any]) -> None:
+        """Write a single audit record in JSONL format."""
+        self._ensure_init()
+        record = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "event": event,
+            **details,
+        }
+        try:
+            with open(self._log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as e:
+            # Graceful degradation — don't fail on audit log write error
+            logger.warning(f"Audit log write failed: {e}")
+
+
+# Global audit logger instance
+_audit_logger = _AuditLogger()
+
+
+def _log_injection_event(pattern: str, user_input: str) -> None:
+    """Log a prompt injection detection event to audit log."""
+    input_hash = hashlib.sha256(user_input.encode("utf-8")).hexdigest()[:16]
+    _audit_logger.record("injection_detected", {
+        "pattern": pattern,
+        "input_hash": input_hash,
+        "input_preview": user_input[:200],
+        "input_length": len(user_input),
+    })
 
 
 # ============================================================
@@ -111,6 +171,7 @@ def sanitize_user_input(user_input: str, max_length: int = MAX_USER_INPUT_LENGTH
     for pattern in _INJECTION_PATTERNS:
         if pattern.search(user_input) or pattern.search(_collapsed_input):
             logger.warning(f"Potential prompt injection detected: {pattern.pattern}")
+            _log_injection_event(pattern.pattern, user_input)
             raise ValueError(
                 "Potential prompt injection detected. Please rephrase your query."
             )
@@ -118,6 +179,7 @@ def sanitize_user_input(user_input: str, max_length: int = MAX_USER_INPUT_LENGTH
     # Check for excessive special characters (obfuscation attempt)
     if _SUSPICIOUS_CHARS.search(user_input):
         logger.warning("Excessive special characters detected in input")
+        _log_injection_event("suspicious_chars", user_input)
         raise ValueError(
             "Input contains excessive special characters. Please simplify your query."
         )
@@ -504,16 +566,24 @@ class HumanApprovalManager:
     """
     Manages human-in-the-loop approval for dangerous operations.
 
-    In CLI mode: prompts user for confirmation
+    In CLI mode: prompts user for confirmation (via prompt_callback)
     In automated mode (cron, CI): auto-approve or deny based on configuration
     """
 
-    def __init__(self, auto_approve: bool = False):
+    def __init__(
+        self,
+        auto_approve: bool = False,
+        prompt_callback: Optional[Callable[[str], bool]] = None,
+    ):
         """
         Args:
             auto_approve: If True, automatically approve all operations (for CI/testing)
+            prompt_callback: Optional callback(prompt: str) -> bool for interactive
+                CLI approval. Receives a formatted prompt string, returns True (approve)
+                or False (deny). If not set, dangerous operations default to deny.
         """
         self.auto_approve = auto_approve
+        self.prompt_callback = prompt_callback
         self._approved: List[str] = []
         self._denied: List[str] = []
 
@@ -539,8 +609,28 @@ class HumanApprovalManager:
         risk = get_tool_risk_level(tool_name)
         logger.warning(f"[HITL] Dangerous operation requested: {tool_name} (risk: {risk})")
 
-        # In CLI, this will be overridden by an interactive prompt
-        # For now, return False (deny) as safe default
+        # Interactive CLI approval via callback
+        if self.prompt_callback is not None:
+            prompt = (
+                f"⚠️  危险操作请求：{tool_name}（风险级别: {risk}）\n"
+                f"参数: {tool_args}\n"
+                f"是否批准执行？(y/n) "
+            )
+            try:
+                approved = self.prompt_callback(prompt)
+                if approved:
+                    self._approved.append(f"{tool_name}({tool_args})")
+                    logger.info(f"[HITL] Approved by user: {tool_name}")
+                else:
+                    self._denied.append(f"{tool_name}({tool_args})")
+                    logger.warning(f"[HITL] Denied by user: {tool_name}")
+                return approved
+            except Exception as e:
+                logger.error(f"[HITL] Prompt callback failed: {e}, defaulting to deny")
+                self._denied.append(f"{tool_name}({tool_args})")
+                return False
+
+        # No callback — safe default (deny)
         self._denied.append(f"{tool_name}({tool_args})")
         return False
 
@@ -555,9 +645,15 @@ class HumanApprovalManager:
 _approval_manager: Optional[HumanApprovalManager] = None
 
 
-def get_approval_manager(auto_approve: bool = False) -> HumanApprovalManager:
+def get_approval_manager(
+    auto_approve: bool = False,
+    prompt_callback: Optional[Callable[[str], bool]] = None,
+) -> HumanApprovalManager:
     """Get or create the global approval manager."""
     global _approval_manager
     if _approval_manager is None:
-        _approval_manager = HumanApprovalManager(auto_approve=auto_approve)
+        _approval_manager = HumanApprovalManager(
+            auto_approve=auto_approve,
+            prompt_callback=prompt_callback,
+        )
     return _approval_manager

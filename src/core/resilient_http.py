@@ -13,7 +13,7 @@ Reliable retry logic based on the tenacity library.
 
 import asyncio
 import time
-from typing import Optional, Callable
+from typing import Any, Dict, Optional, Callable
 from functools import wraps
 
 import requests
@@ -28,6 +28,58 @@ from tenacity import (
 from src.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class _AdaptiveRateLimiter:
+    """Dynamic rate limiter that adjusts based on 429 responses.
+
+    - On 429: doubles the inter-request delay (up to max)
+    - On success after delay: gradually reduces delay by 5% per success
+    - Decay factor ensures slow recovery, preventing burst after a single success
+    """
+
+    def __init__(
+        self,
+        initial_delay: float = 0.0,
+        max_delay: float = 30.0,
+        backoff_factor: float = 2.0,
+        recovery_factor: float = 0.95,
+    ):
+        self._delay = initial_delay
+        self._max_delay = max_delay
+        self._backoff_factor = backoff_factor
+        self._recovery_factor = recovery_factor
+        self._429_count = 0
+
+    def on_rate_limited(self) -> None:
+        """Called when a 429 response is received — increase delay."""
+        self._429_count += 1
+        old_delay = self._delay
+        self._delay = min(self._delay * self._backoff_factor if self._delay > 0 else 1.0, self._max_delay)
+        logger.warning(
+            f"Rate limiter: 429 received ({self._429_count} total), "
+            f"delay {old_delay:.1f}s → {self._delay:.1f}s"
+        )
+
+    def on_success(self) -> None:
+        """Called on successful response — gradually reduce delay."""
+        if self._delay > 0:
+            self._delay *= self._recovery_factor
+            # Floor: below 0.01s is effectively zero
+            if self._delay < 0.01:
+                self._delay = 0.0
+                logger.info("Rate limiter: recovered, delay removed")
+
+    @property
+    def current_delay(self) -> float:
+        return self._delay
+
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "current_delay": round(self._delay, 2),
+            "max_delay": self._max_delay,
+            "429_count": self._429_count,
+        }
 
 
 # Custom exceptions
@@ -100,6 +152,9 @@ class ResilientHTTPClient:
         self._half_open: bool = False  # P2: True during half-open probe
         self._half_open_allowed: bool = False  # P2: One probe allowed
 
+        # Adaptive rate limiter
+        self._rate_limiter = _AdaptiveRateLimiter()
+
         # Session
         self._session = requests.Session()
 
@@ -147,6 +202,8 @@ class ResilientHTTPClient:
             logger.info("Half-open probe succeeded, circuit closed")
         else:
             self._circuit_open = False
+        # Adaptive rate limiter — gradually reduce delay on success
+        self._rate_limiter.on_success()
 
     def _record_failure(self) -> None:
         """Record failure. In half-open state, re-opens the circuit."""
@@ -180,6 +237,10 @@ class ResilientHTTPClient:
             f"Rate limit exceeded. Retry after {retry_after_sec} seconds",
             retry_after=retry_after_sec,
         )
+
+    def _record_rate_limited(self) -> None:
+        """Called when a 429 is detected — notify adaptive rate limiter."""
+        self._rate_limiter.on_rate_limited()
 
     @retry(
         stop=stop_after_attempt(5),
@@ -218,6 +279,10 @@ class ResilientHTTPClient:
         # Check circuit breaker
         self._check_circuit_breaker()
 
+        # Adaptive rate limiter — wait if needed to avoid burst
+        if self._rate_limiter.current_delay > 0:
+            time.sleep(self._rate_limiter.current_delay)
+
         try:
             response = self._session.request(
                 method,
@@ -228,6 +293,7 @@ class ResilientHTTPClient:
 
             # Handle 429 rate limit
             if response.status_code == 429 and handle_rate_limit:
+                self._record_rate_limited()
                 self._handle_rate_limit(response)
 
             # Handle other error status codes
@@ -312,6 +378,10 @@ class ResilientHTTPClient:
             None,
             lambda: self.request(method, url, timeout=timeout, **kwargs),
         )
+
+    def get_rate_limiter_state(self) -> Dict[str, Any]:
+        """Get adaptive rate limiter state."""
+        return self._rate_limiter.get_state()
 
     def close(self) -> None:
         """Close client"""

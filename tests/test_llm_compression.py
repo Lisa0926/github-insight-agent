@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Tests for LLM-based conversation summarization (compression)."""
+"""Tests for LLM-based conversation compression."""
 
-import asyncio
-
+import json
 from src.core.conversation import ConversationManager
 from src.core.agentscope_memory import AgentScopeMemory
 
