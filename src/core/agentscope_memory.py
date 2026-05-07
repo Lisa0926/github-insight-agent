@@ -39,16 +39,19 @@ class AgentScopeMemory:
     def __init__(
         self,
         max_messages: int = DEFAULT_MAX_MESSAGES,
+        llm_caller=None,
     ):
         """
         Initialize AgentScope Memory
 
         Args:
             max_messages: Maximum message count threshold
+            llm_caller: Optional async callable(messages) -> str for LLM-based summarization
         """
         self.memory = InMemoryMemory()
         self.max_messages = max_messages
         self.compressed_summary: str = ""
+        self._llm_caller = llm_caller
 
         logger.info(f"AgentScopeMemory initialized (max_messages={max_messages})")
 
@@ -200,7 +203,10 @@ class AgentScopeMemory:
 
     def _generate_summary(self, messages: List[Msg]) -> str:
         """
-        Generate a memory summary
+        Generate a memory summary.
+
+        Uses LLM-based summarization if _llm_caller is available;
+        falls back to rule-based extraction.
 
         Args:
             messages: List of messages to compress
@@ -208,6 +214,24 @@ class AgentScopeMemory:
         Returns:
             Summary string
         """
+        # Try LLM summarization first
+        if self._llm_caller is not None:
+            try:
+                llm_messages = [
+                    {"role": "system", "content": "你是一个对话摘要专家。请将以下对话历史压缩为简洁的结构化摘要，保留关键信息和结论。"},
+                    {"role": "user", "content": "\n".join(
+                        f"[{msg.role}] {str(msg.content)[:500]}"
+                        for msg in messages[-20:]
+                    )},
+                ]
+                summary = self._run_async(self._llm_caller(llm_messages))
+                if summary and len(summary.strip()) > 10:
+                    logger.info(f"LLM-generated summary: {len(summary)} chars")
+                    return "【Historical Conversation Summary】\n" + summary + "\n【End】"
+            except Exception as e:
+                logger.warning(f"LLM summarization failed, using fallback: {e}")
+
+        # Fallback: rule-based extraction
         summary_parts = ["【Historical Conversation Summary】"]
 
         # Count tool calls

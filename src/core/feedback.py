@@ -188,6 +188,36 @@ class FeedbackCollector:
         finally:
             conn.close()
 
+    def get_positive_feedback_patterns(self, limit: int = 10) -> List[str]:
+        """Extract positive feedback reason patterns for prompt injection.
+
+        Returns a deduplicated list of reason strings from 'good' feedback entries,
+        ordered by recency. These patterns can be injected into system prompts to
+        reinforce behaviors the user has explicitly approved.
+
+        Args:
+            limit: Maximum number of patterns to return.
+
+        Returns:
+            List of reason strings from positive feedback.
+        """
+        conn = self._get_connection()
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT DISTINCT reason
+                FROM feedback
+                WHERE rating = 'good' AND reason != ''
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(row)["reason"].strip() for row in rows if row["reason"].strip()]
+        finally:
+            conn.close()
+
 
 class FeedbackSession:
     """

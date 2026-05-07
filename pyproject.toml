@@ -60,3 +60,22 @@ namespaces = false
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.md"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/report/*",
+    "src/web/*",
+    "src/llm/providers/*",
+    "src/cli/*",
+    "src/github_mcp/*",
+    "src/workflows/report_generator.py",
+    "src/workflows/agent_pipeline.py",
+    "src/tools/code_quality_tool.py",
+    "src/tools/github_toolkit.py",
+    "src/agents/*",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

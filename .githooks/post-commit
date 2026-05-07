@@ -1,32 +1,28 @@
 #!/bin/sh
 # Git post-commit hook: Auto-update CHANGELOG.md after each commit
 #
-# 安装方法:
+# Installation:
 #   cp .githooks/post-commit .git/hooks/post-commit
 #   chmod +x .git/hooks/post-commit
 
-# 检查 git-cliff 是否已安装
+# Check if git-cliff is installed
 if ! command -v git-cliff &> /dev/null; then
-    echo "⚠️  git-cliff 未安装，跳过 Changelog 更新"
-    echo "   安装命令：pip install git-cliff"
     exit 0
 fi
 
-# 生成未发布的 changelog 变更
-git cliff --unreleased --output CHANGELOG.md.tmp 2>/dev/null
+# Generate unreleased changelog
+git cliff --unreleased --output CHANGELOG.md.tmp 2>/dev/null || exit 0
 
-# 如果生成成功且有变化，更新 CHANGELOG.md
 if [ -f CHANGELOG.md.tmp ]; then
-    # 保留文件头的说明部分，只更新版本内容
+    # Preserve header (first 15 lines), append new content
     head -n 15 CHANGELOG.md > CHANGELOG.md.new
     tail -n +2 CHANGELOG.md.tmp >> CHANGELOG.md.new
-
     mv CHANGELOG.md.new CHANGELOG.md
     rm -f CHANGELOG.md.tmp
 
-    echo "✅ Changelog 已自动更新"
-
-    # 暂存 CHANGELOG.md（可选，取消下面注释自动提交）
-    # git add CHANGELOG.md
-    # git commit -m "docs: auto-update changelog" --no-verify
+    # Only amend if changelog actually changed
+    if ! git diff --quiet --exit-code CHANGELOG.md 2>/dev/null; then
+        git add CHANGELOG.md
+        git commit --amend --no-verify -C HEAD 2>/dev/null
+    fi
 fi

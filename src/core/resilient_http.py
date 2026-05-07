@@ -97,35 +97,68 @@ class ResilientHTTPClient:
         self._failure_count = 0
         self._circuit_open = False
         self._circuit_open_time: Optional[float] = None
+        self._half_open: bool = False  # P2: True during half-open probe
+        self._half_open_allowed: bool = False  # P2: One probe allowed
 
         # Session
         self._session = requests.Session()
 
     def _check_circuit_breaker(self) -> None:
-        """Check circuit breaker status"""
+        """Check circuit breaker status with half-open support.
+
+        States:
+        - closed: normal operation, requests allowed
+        - open: requests blocked (circuit tripped after failures)
+        - half-open: timeout elapsed, one probe request allowed
+        """
         if self._circuit_open:
             if self._circuit_open_time is None:
-                self._circuit_open = False
-                self._failure_count = 0
+                # No timestamp — assume recovered
+                self._close_circuit()
             elif time.time() - self._circuit_open_time > self.circuit_breaker_timeout:
-                # Circuit breaker timed out, attempt recovery
-                self._circuit_open = False
-                self._failure_count = 0
-                logger.info("Circuit breaker recovered")
+                # Timeout elapsed — transition to half-open (allow one probe)
+                if not self._half_open_allowed:
+                    self._half_open = True
+                    self._half_open_allowed = True
+                    logger.info(
+                        "Circuit breaker entering half-open state — allowing probe request"
+                    )
+                # Allow the probe request through
+                return
             else:
                 raise CircuitBreakerError(
                     "Circuit breaker is open, requests are blocked"
                 )
 
-    def _record_success(self) -> None:
-        """Record success"""
-        self._failure_count = 0
+    def _close_circuit(self) -> None:
+        """Close the circuit breaker (reset state)."""
         self._circuit_open = False
+        self._failure_count = 0
+        self._half_open = False
+        self._half_open_allowed = False
+        logger.info("Circuit breaker recovered")
+
+    def _record_success(self) -> None:
+        """Record success. In half-open state, closes the circuit."""
+        self._failure_count = 0
+        if self._half_open:
+            # Probe request succeeded — close the circuit
+            self._close_circuit()
+            logger.info("Half-open probe succeeded, circuit closed")
+        else:
+            self._circuit_open = False
 
     def _record_failure(self) -> None:
-        """Record failure"""
+        """Record failure. In half-open state, re-opens the circuit."""
         self._failure_count += 1
-        if self._failure_count >= self.circuit_breaker_threshold:
+        if self._half_open:
+            # Probe request failed — re-open the circuit
+            self._half_open = False
+            self._half_open_allowed = False
+            self._circuit_open = True
+            self._circuit_open_time = time.time()
+            logger.warning("Half-open probe failed, circuit re-opened")
+        elif self._failure_count >= self.circuit_breaker_threshold:
             self._circuit_open = True
             self._circuit_open_time = time.time()
             logger.warning(

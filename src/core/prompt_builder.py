@@ -12,7 +12,7 @@ Usage:
     prompt = get_system_prompt("pipeline", prompt_key="followup_system_prompt")
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from src.core.kpi_tracker import _load_role_kpi_config
 from src.core.logger import get_logger
@@ -182,17 +182,20 @@ def get_system_prompt(
     agent_key: str,
     prompt_key: str = "system_prompt",
     use_constraints: bool = True,
+    feedback_patterns: Optional[List[str]] = None,
 ) -> str:
     """
     Build a system prompt for the given agent.
 
     Loads from role_kpi.yaml if available, falls back to hardcoded defaults.
-    Optionally appends in_scope/out_of_scope constraints.
+    Optionally appends in_scope/out_of_scope constraints and positive feedback
+    patterns for personalized behavior reinforcement.
 
     Args:
         agent_key: Agent key in role_kpi.yaml (researcher / analyst / pipeline)
         prompt_key: Which prompt field to load (default: "system_prompt")
         use_constraints: Whether to append in_scope/out_of_scope constraints
+        feedback_patterns: List of positive feedback reason strings to inject
 
     Returns:
         Complete system prompt string
@@ -203,6 +206,9 @@ def get_system_prompt(
 
     if use_constraints:
         prompt = _append_role_constraints(prompt, agent_key)
+
+    if feedback_patterns:
+        prompt = _append_feedback_patterns(prompt, feedback_patterns)
 
     return prompt.strip()
 
@@ -272,3 +278,27 @@ def _append_role_constraints(prompt: str, agent_key: str) -> str:
         prompt += "\n\n" + "\n\n".join(constraints)
 
     return prompt
+
+
+def _append_feedback_patterns(prompt: str, patterns: List[str]) -> str:
+    """Append positive feedback patterns to the prompt for behavior reinforcement.
+
+    These patterns represent behaviors the user has explicitly approved in
+    previous interactions, guiding the agent toward preferred output styles.
+
+    Args:
+        prompt: Current system prompt.
+        patterns: List of positive feedback reason strings.
+
+    Returns:
+        System prompt with feedback patterns appended.
+    """
+    if not patterns:
+        return prompt
+
+    feedback_section = (
+        "## 用户偏好（历史正向反馈）\n"
+        "以下行为模式获得了用户积极反馈，请在输出时优先采用：\n"
+        + "\n".join(f"- {p}" for p in patterns)
+    )
+    return prompt + "\n\n" + feedback_section

@@ -250,6 +250,22 @@ class AgentPipeline:
         """Get recent feedback entries."""
         return self._report_gen.get_recent_feedback(limit=limit)
 
+    def get_north_star_metric(self) -> Dict[str, Any]:
+        """Return north-star metric: overall positive feedback rate."""
+        return self._report_gen.get_north_star_metric()
+
+    def get_feedback_trends(self, days: int = 30) -> List[Dict[str, Any]]:
+        """Return daily feedback trends for the last N days."""
+        return self._report_gen.get_feedback_trends(days=days)
+
+    def get_trend_summary(self) -> str:
+        """Return human-readable trend summary."""
+        return self._report_gen.get_trend_summary()
+
+    def get_report_stats(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent feedback entries with derived metrics."""
+        return self._report_gen.get_report_stats(limit=limit)
+
     def save_report(self, output_path: str) -> bool:
         """Save report to file"""
         results = self.get_results()

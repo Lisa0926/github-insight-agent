@@ -20,6 +20,11 @@ from src.tools.github_tool import GitHubTool
 from src.github_mcp import create_github_mcp_client, register_github_mcp_tools
 from src.core.logger import get_logger
 
+# Lazy imports for orphan tools (avoid circular imports at module load)
+# - code_quality_tool: evaluate_code_quality
+# - owasp_security_rules: scan_security
+# - pr_review_tool: review_pull_request
+
 logger = get_logger(__name__)
 
 
@@ -321,6 +326,122 @@ def create_github_toolkit(  # noqa: C901
         check_rate_limit,
         group_name="github",
         namesake_strategy="skip",  # Skip duplicates with MCP tools
+    )
+
+    # Create orphan tool groups (code_quality, security_scan, pr_review)
+    toolkit.create_tool_group("code_quality", description="Code quality and security scoring tools", active=True)
+    toolkit.create_tool_group("security_scan", description="OWASP security scanning tools", active=True)
+    toolkit.create_tool_group("pr_review", description="PR automated review tools", active=True)
+
+    def _adapt_pydantic_to_agentscope(pydantic_response) -> ToolResponse:
+        """Adapt Pydantic ToolResponse to AgentScope ToolResponse."""
+        if pydantic_response.success:
+            data = pydantic_response.data
+            message = pydantic_response.error_message if isinstance(pydantic_response.error_message, str) else ""
+            # Pydantic ToolResponse stores report text in data.message if available
+            if isinstance(data, dict) and "report_text" in data:
+                message = data.pop("report_text")
+            elif hasattr(pydantic_response, "message"):
+                message = pydantic_response.message or ""
+            content_text = message if message else str(data)
+            return ToolResponse(content=[{"text": content_text}])
+        else:
+            return ToolResponse(content=[{"text": f"Error: {pydantic_response.error_message}"}])
+
+    # 6. Register code quality evaluation tool
+    def evaluate_code_quality(
+        readme_content: str,
+        repo_info_json: str,
+        use_llm: bool = True,
+    ) -> ToolResponse:
+        """
+        Evaluate code quality and security of a GitHub project.
+
+        Args:
+            readme_content: README content of the project
+            repo_info_json: JSON string of repository metadata (full_name, stars, language, etc.)
+            use_llm: Whether to use LLM-enhanced evaluation
+
+        Returns:
+            Code quality evaluation report with quality/security scores
+        """
+        import json as _json
+        try:
+            repo_info = _json.loads(repo_info_json) if isinstance(repo_info_json, str) else repo_info_json
+        except _json.JSONDecodeError:
+            return ToolResponse(content=[{"text": "Error: Invalid repo_info_json format"}])
+
+        from src.tools.code_quality_tool import evaluate_code_quality as _eval_cq
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            _eval_cq(readme_content, repo_info, use_llm=use_llm)
+        )
+        return _adapt_pydantic_to_agentscope(result)
+
+    toolkit.register_tool_function(
+        evaluate_code_quality,
+        group_name="code_quality",
+        namesake_strategy="skip",
+    )
+
+    # 7. Register security scanning tool
+    def scan_security_code(
+        file_path: str,
+        code_content: str,
+    ) -> ToolResponse:
+        """
+        Scan code for OWASP Top 10 security vulnerabilities.
+
+        Args:
+            file_path: File path or identifier for the code
+            code_content: Source code content to scan
+
+        Returns:
+            Security scan report with categorized vulnerabilities
+        """
+        import asyncio
+        from src.tools.owasp_security_rules import scan_security as _scan_sec
+        result = asyncio.get_event_loop().run_until_complete(
+            _scan_sec(file_path, code_content)
+        )
+        return _adapt_pydantic_to_agentscope(result)
+
+    toolkit.register_tool_function(
+        scan_security_code,
+        group_name="security_scan",
+        namesake_strategy="skip",
+    )
+
+    # 8. Register PR review tool
+    def review_code_changes(
+        pr_title: str,
+        pr_description: str,
+        diff_content: str,
+        use_llm: bool = True,
+    ) -> ToolResponse:
+        """
+        Review Pull Request code changes for quality, security, and best practices.
+
+        Args:
+            pr_title: Title of the Pull Request
+            pr_description: Description/body of the Pull Request
+            diff_content: git diff content of the changes
+            use_llm: Whether to use LLM-enhanced review
+
+        Returns:
+            PR review report with issues, suggestions, and scores
+        """
+        import asyncio
+        from src.tools.pr_review_tool import review_pull_request as _review_pr
+        result = asyncio.get_event_loop().run_until_complete(
+            _review_pr(pr_title, pr_description, diff_content, use_llm=use_llm)
+        )
+        return _adapt_pydantic_to_agentscope(result)
+
+    toolkit.register_tool_function(
+        review_code_changes,
+        group_name="pr_review",
+        namesake_strategy="skip",
     )
 
     logger.info(f"GitHub Toolkit created with {len(toolkit.get_json_schemas())} tools registered (MCP: {mcp_tool_count})")

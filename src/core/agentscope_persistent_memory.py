@@ -259,6 +259,42 @@ class PersistentMemory:
 
         return result
 
+    def get_messages_summary(self, max_messages: int = 10) -> str:
+        """Get a summary of recent messages for cross-session context loading.
+
+        Returns the compressed_summary (if available) followed by the most
+        recent conversation turns, truncated for brevity.
+
+        Args:
+            max_messages: Maximum number of recent messages to include.
+
+        Returns:
+            A formatted summary string suitable for injection into the
+            initial system prompt.
+        """
+        parts: List[str] = []
+
+        if self.compressed_summary:
+            parts.append(f"[Previous session summary]\n{self.compressed_summary}\n[/Previous session summary]")
+
+        messages = self.get_memory()
+        recent = messages[-max_messages:] if len(messages) > max_messages else messages
+
+        if recent:
+            turns: List[str] = []
+            for msg in recent:
+                role = msg.role
+                content = str(msg.content)[:200]
+                if len(str(msg.content)) > 200:
+                    content += "..."
+                turns.append(f"[{role}]: {content}")
+            parts.append("[Recent conversation]\n" + "\n".join(turns) + "\n[/Recent conversation]")
+
+        if not parts:
+            return ""
+
+        return "\n\n".join(parts)
+
     def _check_and_compress(self) -> None:
         """Check message count, compress if threshold exceeded"""
         if self.size() > self.max_messages:

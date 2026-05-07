@@ -25,6 +25,7 @@ import requests
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
 from src.core.resilient_http import ResilientHTTPClient, RateLimitError
+from src.core.tool_base import BaseTool
 from src.types.schemas import GitHubRepo, GitHubSearchResult, ToolResponse
 
 # Import AgentScope tracing (graceful fallback if disabled)
@@ -39,7 +40,7 @@ except ImportError:
 logger = get_logger(__name__)
 
 
-class GitHubTool:
+class GitHubTool(BaseTool):
     """
     GitHub API tool class
 
@@ -47,6 +48,8 @@ class GitHubTool:
     - Repository search (search_repositories)
     - README retrieval (get_readme)
     - Unified error handling and retry mechanism
+
+    Implements BaseTool protocol for unified tool integration.
 
     Attributes:
         BASE_URL: GitHub API base URL
@@ -494,3 +497,59 @@ class GitHubTool:
         )
 
         return summary
+
+    # -- BaseTool Protocol Implementation --
+
+    def get_name(self) -> str:
+        return "github_tool"
+
+    def get_description(self) -> str:
+        return (
+            "GitHub API tool for repository search, README retrieval, "
+            "and project information lookup."
+        )
+
+    def get_input_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search_repositories", "get_readme", "get_repo_info", "get_project_summary"],
+                    "description": "Action to perform",
+                },
+                "query": {"type": "string", "description": "Search keyword"},
+                "owner": {"type": "string", "description": "Repository owner"},
+                "repo": {"type": "string", "description": "Repository name"},
+                "sort": {"type": "string", "enum": ["stars", "forks", "updated"], "description": "Sort field"},
+                "per_page": {"type": "integer", "description": "Results per page (max 100)"},
+            },
+            "required": ["action"],
+        }
+
+    def execute(self, input_data: Dict[str, Any]) -> Any:
+        """Execute a GitHub tool action based on input_data."""
+        action = input_data.get("action", "")
+        if action == "search_repositories":
+            return self.search_repositories(
+                query=input_data.get("query", ""),
+                sort=input_data.get("sort", "stars"),
+                per_page=input_data.get("per_page", 10),
+            )
+        elif action == "get_readme":
+            return self.get_readme(
+                owner=input_data["owner"],
+                repo=input_data["repo"],
+            )
+        elif action == "get_repo_info":
+            return self.get_repo_info(
+                owner=input_data["owner"],
+                repo=input_data["repo"],
+            )
+        elif action == "get_project_summary":
+            return self.get_project_summary(
+                owner=input_data["owner"],
+                repo=input_data["repo"],
+            )
+        else:
+            raise ValueError(f"Unknown action: {action}")

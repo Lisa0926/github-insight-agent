@@ -43,6 +43,7 @@ class ConversationManager:
         max_turns: int = DEFAULT_MAX_TURNS,
         storage_path: Optional[str] = None,
         auto_save: bool = False,
+        llm_caller=None,
     ):
         """
         Initialize conversation manager
@@ -51,10 +52,12 @@ class ConversationManager:
             max_turns: Maximum conversation turn threshold, triggers compression when exceeded
             storage_path: Conversation history JSON file path (optional, no persistence if not provided)
             auto_save: Whether to auto-save after each message is added
+            llm_caller: Optional async callable(messages) -> str for LLM-based summarization
         """
         self.max_turns = max_turns
         self.storage_path = storage_path
         self.auto_save = auto_save
+        self._llm_caller = llm_caller
 
         # Conversation history: each message contains role, content, timestamp, metadata
         self.conversation_history: List[Dict[str, Any]] = []
@@ -164,7 +167,10 @@ class ConversationManager:
 
     def _generate_summary(self, messages: List[Dict[str, Any]]) -> str:
         """
-        Generate a conversation summary
+        Generate a conversation summary.
+
+        Uses LLM-based summarization if _llm_caller is available;
+        falls back to rule-based extraction.
 
         Args:
             messages: List of messages to compress
@@ -172,9 +178,33 @@ class ConversationManager:
         Returns:
             Summary string
         """
-        # Simple strategy: extract key information
-        # TODO: Can call LLM for smarter summary generation
+        # Try LLM summarization first
+        if self._llm_caller is not None:
+            try:
+                import asyncio
+                llm_messages = [
+                    {"role": "system", "content": "你是一个对话摘要专家。请将以下对话历史压缩为简洁的结构化摘要，保留关键信息和结论。"},
+                    {"role": "user", "content": "\n".join(
+                        f"[{m['role']}] {m['content'][:500]}"
+                        for m in messages[-20:]
+                    )},
+                ]
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
 
+            try:
+                summary = loop.run_until_complete(
+                    self._llm_caller(llm_messages)
+                )
+                if summary and len(summary.strip()) > 10:
+                    logger.info(f"LLM-generated summary: {len(summary)} chars")
+                    return "【Historical Conversation Summary】\n" + summary + "\n【End】"
+            except Exception as e:
+                logger.warning(f"LLM summarization failed, using fallback: {e}")
+
+        # Fallback: rule-based extraction
         summary_parts = []
 
         # Count tool calls

@@ -24,6 +24,7 @@ from src.core.feedback import get_feedback_collector, FeedbackSession  # noqa: E
 import agentscope  # noqa: E402
 from src.core.config_manager import ConfigManager  # noqa: E402
 from src.workflows.agent_pipeline import AgentPipeline  # noqa: E402
+from src.core.agentscope_persistent_memory import get_persistent_memory  # noqa: E402
 
 
 def _setup_tracing(config: ConfigManager) -> None:
@@ -104,6 +105,9 @@ def print_welcome():
     }
     renderer.print_help(commands)
 
+    # P2: Cross-session memory — show recent conversation summary
+    _show_cross_session_summary()
+
     # Natural language hint
     renderer.print_info(
         "💡 支持自然语言输入，例如：\n"
@@ -116,6 +120,22 @@ def print_welcome():
         "  • ↑↓ 键：翻阅历史命令\n"
         "  • Ctrl+Q：退出程序"
     )
+
+
+def _show_cross_session_summary() -> None:
+    """P2: Display cross-session memory summary if available."""
+    try:
+        pm = get_persistent_memory()
+        summary = pm.get_messages_summary(max_messages=5)
+        if summary:
+            renderer.print_panel(
+                "🔄 上次会话摘要",
+                summary[:500] + ("..." if len(summary) > 500 else ""),
+                style="yellow",
+            )
+    except Exception:
+        # Graceful degradation — don't fail startup if memory is unavailable
+        pass
 
 
 def check_environment():

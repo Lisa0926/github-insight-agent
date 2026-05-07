@@ -244,22 +244,33 @@ class AgentCircuitBreaker:
         self._token_count: int = 0
         self._open: bool = False
         self._reason: str = ""
+        self._half_open: bool = False  # P2: Half-open probe state
 
     def start_session(self) -> None:
-        """Start a new execution session."""
+        """Start a new execution session.
+
+        If the breaker was previously tripped, this acts as a half-open probe:
+        a new session is started to test if the underlying issue is resolved.
+        """
+        was_open = self._open
         self._step_count = 0
         self._start_time = time.time()
         self._token_count = 0
         self._open = False
         self._reason = ""
+        if was_open:
+            self._half_open = True
+            logger.info("Agent circuit breaker entering half-open probe state")
+        else:
+            self._half_open = False
         logger.debug(f"Circuit breaker session started (max_steps={self.max_steps}, max_time={self.max_time_seconds}s)")
 
     def check(self) -> None:
         """
         Check if circuit breaker should trip.
 
-        Raises:
-            RuntimeError: If any limit is exceeded
+        In half-open state, a successful session completion (steps within
+        limits) transitions to closed. A trip re-opens.
         """
         if self._open:
             raise RuntimeError(f"Circuit breaker open: {self._reason}")
@@ -268,6 +279,8 @@ class AgentCircuitBreaker:
         if self._step_count >= self.max_steps:
             self._open = True
             self._reason = f"Max steps exceeded ({self.max_steps})"
+            if self._half_open:
+                logger.warning("Half-open probe failed: max steps exceeded")
             raise RuntimeError(self._reason)
 
         # Time limit
@@ -275,7 +288,14 @@ class AgentCircuitBreaker:
         if elapsed >= self.max_time_seconds:
             self._open = True
             self._reason = f"Max time exceeded ({elapsed:.1f}s / {self.max_time_seconds}s)"
+            if self._half_open:
+                logger.warning("Half-open probe failed: time exceeded")
             raise RuntimeError(self._reason)
+
+        # If half-open and we reach here (within limits), probe succeeded
+        if self._half_open:
+            self._half_open = False
+            logger.info("Agent circuit breaker half-open probe succeeded")
 
     def record_step(self) -> int:
         """
@@ -303,6 +323,11 @@ class AgentCircuitBreaker:
     def is_open(self) -> bool:
         return self._open
 
+    @property
+    def is_half_open(self) -> bool:
+        """True if in half-open probe state."""
+        return self._half_open
+
     def get_state(self) -> Dict[str, Any]:
         """Get circuit breaker state."""
         return {
@@ -313,6 +338,7 @@ class AgentCircuitBreaker:
             "tokens": self._token_count,
             "max_tokens": self.max_tokens,
             "open": self._open,
+            "half_open": self._half_open,
             "reason": self._reason,
         }
 

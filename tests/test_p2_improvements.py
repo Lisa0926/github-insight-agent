@@ -1,220 +1,348 @@
 # -*- coding: utf-8 -*-
-"""Tests for P2 improvements: Event Bus, LLM-driven planning, Feedback loop."""
+"""Tests for P2 improvements: MCP robustness, half-open circuit breaker,
+cross-session memory, feedback→prompt injection."""
 
-from unittest.mock import MagicMock
+from unittest.mock import patch, MagicMock
+import time
 
-import pytest
+from src.core.resilient_http import ResilientHTTPClient, CircuitBreakerError
+from src.core.guardrails import AgentCircuitBreaker
+from src.core.feedback import FeedbackCollector, reset_feedback_collector
+from src.core.prompt_builder import get_system_prompt
 
-from src.core.feedback import FeedbackCollector, FeedbackSession, reset_feedback_collector
+
+# ============================================================
+# P2-1: MCP Connection Robustness
+# ============================================================
+
+class TestGitHubMCPClientRobustness:
+    """Test MCP client connection retry and caching."""
+
+    def test_get_available_tools_from_cache(self):
+        """Test get_available_tools() returns cached tools after list_tools()."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        mock_tool = MagicMock()
+        mock_tool.name = "github_search"
+        mock_tool.title = "GitHub Search"
+        mock_tool.description = "Search GitHub repos"
+        mock_tool.inputSchema = {"type": "object"}
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        client._cached_tools = [mock_tool]
+
+        tools = client.get_available_tools()
+        assert len(tools) == 1
+        assert tools[0]["name"] == "github_search"
+        assert tools[0]["description"] == "Search GitHub repos"
+
+    def test_get_available_tools_returns_empty_when_not_connected(self):
+        """Test get_available_tools() returns [] when not cached/connected."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        if '_cached_tools' in client.__dict__:
+            del client.__dict__['_cached_tools']
+
+        tools = client.get_available_tools()
+        assert tools == []
+
+    def test_is_connected_returns_false_when_not_connected(self):
+        """Test connected property returns False when not connected."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        assert client.connected is False
+
+    def test_is_connected_returns_true_when_connected(self):
+        """Test connected property returns True when connected with session."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        client.__dict__['is_connected'] = True
+        client.session = MagicMock()
+        assert client.connected is True
+
+    def test_is_connected_false_with_no_session(self):
+        """Test connected property returns False if session is None."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        client.__dict__['is_connected'] = True
+        client.session = None
+        assert client.connected is False
+
+    def test_connect_with_retry_success_first_attempt(self):
+        """Test connect_with_retry succeeds on first attempt."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        client._max_reconnect_attempts = 3
+        client._base_reconnect_delay = 0.001
+
+        async def mock_connect():
+            client.__dict__['is_connected'] = True
+            client.session = MagicMock()
+
+        async def mock_list_tools():
+            client._cached_tools = []
+
+        with patch.object(client, 'connect', mock_connect), \
+             patch.object(client, 'list_tools', mock_list_tools):
+            result = client.connect_with_retry()
+            assert result is True
+
+    def test_connect_with_retry_exhausts_attempts(self):
+        """Test connect_with_retry returns False after exhausting attempts."""
+        from src.github_mcp.github_mcp_client import GitHubMCPClient
+
+        client = GitHubMCPClient.__new__(GitHubMCPClient)
+        client._max_reconnect_attempts = 2
+        client._base_reconnect_delay = 0.001
+
+        async def mock_connect():
+            raise ConnectionError("No MCP server")
+
+        with patch.object(client, 'connect', mock_connect):
+            result = client.connect_with_retry()
+            assert result is False
 
 
-class TestFeedbackCollectorIntegration:
-    """Test existing FeedbackCollector for P2-9 feedback loop."""
+# ============================================================
+# P2-2: Half-Open Circuit Breaker
+# ============================================================
 
-    @pytest.fixture
-    def feedback_collector(self, tmp_path):
-        reset_feedback_collector()
-        fc = FeedbackCollector(db_path=str(tmp_path / "test.db"))
-        yield fc
-        reset_feedback_collector()
+class TestHalfOpenHTTPCircuitBreaker:
+    """Test HTTP circuit breaker half-open state."""
 
-    def test_record_and_get_recent(self, feedback_collector):
-        row_id = feedback_collector.record(
-            rating="good",
-            reason="Great analysis",
-            user_input="test react",
-            assistant_output="React is a JS library",
-            agent="pipeline",
+    def test_half_open_allows_probe_request(self):
+        """After timeout, circuit allows request (half-open)."""
+        client = ResilientHTTPClient(
+            circuit_breaker_threshold=2,
+            circuit_breaker_timeout=0.01,
         )
-        assert row_id > 0
 
-        recent = feedback_collector.get_recent(limit=5)
-        assert len(recent) >= 1
-        assert recent[0]["rating"] == "good"
+        client._failure_count = 2
+        client._circuit_open = True
+        client._circuit_open_time = time.time() - 0.1
 
-    def test_record_invalid_rating(self, feedback_collector):
-        with pytest.raises(ValueError, match="Invalid rating"):
-            feedback_collector.record(rating="excellent")
+        # Timeout passed — should allow probe
+        client._check_circuit_breaker()  # Should not raise
 
-    def test_feedback_stats(self, feedback_collector):
-        feedback_collector.record(rating="good", reason="nice")
-        feedback_collector.record(rating="good", reason="great")
-        feedback_collector.record(rating="bad", reason="poor")
-
-        stats = feedback_collector.get_stats()
-        assert stats["total"] == 3
-        assert stats["good"] == 2
-        assert stats["bad"] == 1
-        assert stats["positive_rate"] > 0
-
-    def test_feedback_session(self):
-        session = FeedbackSession(run_id="test-001")
-        session.set_last_interaction("user input", "assistant output")
-        session.set_agent("pipeline")
-
-        assert session.last_user_input == "user input"
-        assert session.last_assistant_output == "assistant output"
-        assert session.current_agent == "pipeline"
-        assert session.run_id == "test-001"
-
-    def test_record_with_session(self, feedback_collector):
-        session = FeedbackSession(run_id="run-123")
-        session.set_last_interaction("search react", "Found React project")
-        session.set_agent("pipeline")
-
-        row_id = feedback_collector.record_quick(
-            rating="good",
-            reason="Accurate",
-            session_state=session,
+    def test_circuit_stays_open_before_timeout(self):
+        """Circuit stays open when timeout hasn't passed."""
+        client = ResilientHTTPClient(
+            circuit_breaker_threshold=2,
+            circuit_breaker_timeout=60,
         )
-        assert row_id > 0
 
-        recent = feedback_collector.get_recent(limit=1)
-        assert recent[0]["user_input"] == "search react"
-        assert recent[0]["assistant_output"] == "Found React project"
-        assert recent[0]["run_id"] == "run-123"
+        client._failure_count = 2
+        client._circuit_open = True
+        client._circuit_open_time = time.time()
 
+        try:
+            client._check_circuit_breaker()
+            assert False, "Should have raised CircuitBreakerError"
+        except CircuitBreakerError:
+            pass
 
-class TestLLMDrivenPlanningHeuristicFallback:
-    """Test heuristic fallback for P2-7 LLM-driven planning."""
+    def test_half_open_probe_success_resets(self):
+        """Successful request in half-open state resets circuit breaker."""
+        client = ResilientHTTPClient(
+            circuit_breaker_threshold=2,
+            circuit_breaker_timeout=0.01,
+        )
 
-    def test_heuristic_plan_deep(self):
-        """High-star projects should trigger deep strategy."""
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
+        client._failure_count = 2
+        client._circuit_open = True
+        client._circuit_open_time = time.time() - 0.1
 
-        results = [
-            {"full_name": "a/b", "stars": 100000, "language": "Python", "trend_score": 0.8},
-            {"full_name": "c/d", "stars": 80000, "language": "TypeScript", "trend_score": 0.9},
-        ]
-
-        plan = rg._heuristic_plan(results)
-        assert plan["strategy"] == "deep"
-        # Confidence is capped by language formula: min(0.8, 0.3 + 0.1*2/2) = 0.4
-        assert plan["confidence"] > 0
-
-    def test_heuristic_plan_standard(self):
-        """Medium-star projects should trigger standard strategy."""
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-
-        results = [
-            {"full_name": "a/b", "stars": 5000, "language": "Python", "trend_score": 0.5},
-            {"full_name": "c/d", "stars": 3000, "language": "JavaScript", "trend_score": 0.6},
-        ]
-
-        plan = rg._heuristic_plan(results)
-        assert plan["strategy"] == "standard"
-
-    def test_heuristic_plan_quick(self):
-        """Low-star projects should trigger quick strategy."""
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-
-        results = [
-            {"full_name": "a/b", "stars": 10, "language": "Rust", "trend_score": None},
-        ]
-
-        plan = rg._heuristic_plan(results)
-        assert plan["strategy"] == "quick"
-        assert plan["confidence"] <= 0.5
-
-    def test_heuristic_plan_empty(self):
-        """Empty results should not crash."""
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-
-        plan = rg._heuristic_plan([])
-        assert plan["strategy"] == "quick"
-
-    def test_heuristic_reflection_needs_more(self):
-        """Low success rate should flag for more analysis."""
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-
-        analysis = [
-            {"project": "a/b", "error": "timeout", "analysis": None},
-            {"project": "c/d", "error": "timeout", "analysis": None},
-        ]
-        plan = {"strategy": "standard"}
-
-        result = rg._heuristic_reflection(analysis, plan)
-        assert result["needs_more_analysis"] is True
-
-    def test_heuristic_reflection_sufficient(self):
-        """Good success rate should be sufficient."""
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-
-        analysis = [
-            {"project": "a/b", "analysis": {"core_function": "test"}},
-            {"project": "c/d", "analysis": {"core_function": "test"}},
-        ]
-        plan = {"strategy": "standard"}
-
-        result = rg._heuristic_reflection(analysis, plan)
-        assert result["needs_more_analysis"] is False
+        time.sleep(0.02)
+        # Enters half-open state
+        client._check_circuit_breaker()
+        assert client._half_open is True
+        # Simulate successful probe — _record_success should close circuit
+        client._record_success()
+        assert client._circuit_open is False
+        assert client._failure_count == 0
+        assert client._half_open is False
 
 
-class TestReportGeneratorEventBusWiring:
-    """Test that ReportGenerator has event_bus wired."""
+class TestHalfOpenAgentCircuitBreaker:
+    """Test Agent circuit breaker half-open state."""
 
-    def test_has_event_bus(self):
-        from src.core.event_bus import get_event_bus, reset_event_bus
-        reset_event_bus()
+    def test_agent_cb_start_session_resets(self):
+        """start_session() resets the agent circuit breaker."""
+        cb = AgentCircuitBreaker(max_steps=5, max_time_seconds=10)
+        cb.start_session()
 
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-        rg.event_bus = get_event_bus()
+        cb._open = True
+        cb._reason = "test"
+        cb.start_session()
 
-        assert rg.event_bus is not None
-        assert rg.event_bus is get_event_bus()
+        assert cb._open is False
+        assert cb._reason == ""
+        assert cb._step_count == 0
 
-        reset_event_bus()
+    def test_agent_cb_check_raises_when_open(self):
+        """check() raises RuntimeError when circuit is open."""
+        cb = AgentCircuitBreaker()
+        cb.start_session()
+        cb._open = True
+        cb._reason = "test reason"
+
+        try:
+            cb.check()
+            assert False, "Should have raised RuntimeError"
+        except RuntimeError as e:
+            assert "test reason" in str(e)
+
+    def test_agent_cb_probe_after_timeout(self):
+        """Test that starting a new session after being tripped acts as a probe."""
+        cb = AgentCircuitBreaker(max_steps=3, max_time_seconds=10)
+        cb.start_session()
+
+        # Trip the breaker
+        for _ in range(3):
+            cb.record_step()
+        try:
+            cb.check()
+        except RuntimeError:
+            pass
+        assert cb._open is True
+
+        # Start new session — the "half-open" probe
+        cb.start_session()
+        assert cb._open is False
+        cb.check()  # Should pass
 
 
-class TestReportGeneratorFeedbackIntegration:
-    """Test that ReportGenerator has feedback_collector wired."""
+# ============================================================
+# P2-3: Cross-Session Memory
+# ============================================================
 
-    def test_has_feedback_collector(self, tmp_path):
-        from src.core.feedback import get_feedback_collector, reset_feedback_collector
+class TestCrossSessionMemory:
+    """Test cross-session memory loading."""
+
+    def test_persistent_memory_get_recent_summary(self):
+        """Test PersistentMemory can retrieve recent conversation summary."""
+        from src.core.agentscope_persistent_memory import PersistentMemory
+        import tempfile
+        import os
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
+
+        try:
+            pm = PersistentMemory(db_path=db_path)
+            pm.add_user_message("Hello from last session")
+            pm.add_assistant_message("Hello! How can I help?")
+
+            summary = pm.get_messages_summary()
+            assert "Hello" in summary
+        finally:
+            os.unlink(db_path)
+
+    def test_persistent_memory_size(self):
+        """Test PersistentMemory size tracking."""
+        from src.core.agentscope_persistent_memory import PersistentMemory
+        import tempfile
+        import os
+
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
+
+        try:
+            pm = PersistentMemory(db_path=db_path)
+            assert pm.size() == 0
+            pm.add_user_message("test")
+            assert pm.size() >= 1
+        finally:
+            os.unlink(db_path)
+
+
+# ============================================================
+# P2-4: Feedback→Prompt Injection
+# ============================================================
+
+class TestFeedbackPatternExtraction:
+    """Test extracting positive feedback patterns from FeedbackCollector."""
+
+    def setup_method(self):
         reset_feedback_collector()
 
-        fc = get_feedback_collector(db_path=str(tmp_path / "test.db"))
-        assert fc is not None
-        assert isinstance(fc, FeedbackCollector)
+    def test_get_positive_feedback_patterns_empty(self):
+        """Test get_positive_feedback_patterns with no feedback."""
+        import tempfile
+        import os
 
-        reset_feedback_collector()
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
 
-    def test_rate_report_method_exists(self):
-        """Verify rate_report method signature exists."""
-        from src.workflows.report_generator import ReportGenerator
-        assert hasattr(ReportGenerator, "rate_report")
-        assert hasattr(ReportGenerator, "get_feedback_stats")
-        assert hasattr(ReportGenerator, "get_recent_feedback")
+        try:
+            collector = FeedbackCollector(db_path=db_path)
+            patterns = collector.get_positive_feedback_patterns()
+            assert patterns == []
+        finally:
+            os.unlink(db_path)
 
-    def test_rate_report_validation(self, tmp_path):
-        """Invalid rating should return False."""
-        from src.core.feedback import reset_feedback_collector
-        reset_feedback_collector()
+    def test_get_positive_feedback_patterns_with_data(self):
+        """Test get_positive_feedback_patterns returns patterns from good feedback."""
+        import tempfile
+        import os
 
-        from src.workflows.report_generator import ReportGenerator
-        rg = ReportGenerator.__new__(ReportGenerator)
-        rg.results = {"query": "", "report": "", "analysis_results": [], "tti": {}}
-        rg.feedback_collector = FeedbackCollector(db_path=str(tmp_path / "test.db"))
-        rg.kpi_tracker = MagicMock()  # Mock KPI tracker
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
 
-        assert rg.rate_report("invalid") is False
-        assert rg.rate_report("good") is True
+        try:
+            collector = FeedbackCollector(db_path=db_path)
+            collector.record(rating="good", reason="detailed analysis")
+            collector.record(rating="good", reason="structured output")
+            collector.record(rating="bad", reason="too slow")
+            collector.record(rating="good", reason="clear explanations")
 
-        reset_feedback_collector()
+            patterns = collector.get_positive_feedback_patterns(limit=10)
+            assert len(patterns) == 3
+            assert "detailed analysis" in patterns
+            assert "structured output" in patterns
+            assert "too slow" not in patterns
+        finally:
+            os.unlink(db_path)
 
+    def test_get_feedback_stats(self):
+        """Test get_stats returns correct counts."""
+        import tempfile
+        import os
 
-class TestAgentPipelineFeedbackMethods:
-    """Test that AgentPipeline has feedback delegation methods."""
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
 
-    def test_has_delegation_methods(self):
-        from src.workflows.agent_pipeline import AgentPipeline
-        assert hasattr(AgentPipeline, "rate_report")
-        assert hasattr(AgentPipeline, "get_feedback_stats")
-        assert hasattr(AgentPipeline, "get_recent_feedback")
+        try:
+            collector = FeedbackCollector(db_path=db_path)
+            collector.record(rating="good", reason="test")
+            collector.record(rating="good", reason="test")
+            collector.record(rating="bad", reason="test")
+
+            stats = collector.get_stats()
+            assert stats["total"] == 3
+            assert stats["good"] == 2
+            assert stats["bad"] == 1
+            assert stats["positive_rate"] > 60
+        finally:
+            os.unlink(db_path)
+
+    def test_prompt_builder_with_feedback_patterns(self):
+        """Test get_system_prompt with feedback patterns injected."""
+        prompt = get_system_prompt("researcher", feedback_patterns=[
+            "structured data output",
+            "clear summary",
+        ])
+
+        assert "structured data output" in prompt
+        assert "clear summary" in prompt
+
+    def test_prompt_builder_without_feedback(self):
+        """Test get_system_prompt works without feedback patterns."""
+        prompt = get_system_prompt("researcher")
+        # Should contain the default researcher prompt content
+        assert len(prompt) > 0

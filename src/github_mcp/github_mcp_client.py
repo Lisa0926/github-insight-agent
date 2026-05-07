@@ -6,11 +6,14 @@ Features:
 - Connect to GitHub MCP Server using AgentScope StdIOStatefulClient
 - Supports tool listing and invocation
 - Integrates with existing Toolkit
+- Connection retry with exponential backoff
+- Tool result caching
 """
 
 import asyncio
 import os
 import shutil
+import time
 from typing import Any, Dict, List, Optional
 from agentscope.mcp import StdIOStatefulClient
 from src.core.config_manager import ConfigManager
@@ -92,21 +95,141 @@ class GitHubMCPClient(StdIOStatefulClient):
             f"GitHub MCP Client initialized: bin={bin_path}, mode={'official(stdio)' if self._is_official else 'npm(stdio)'}"
         )
 
+        # P2: Connection retry config
+        self._max_reconnect_attempts = 3
+        self._base_reconnect_delay = 1.0
+
+        # P2: Tool result cache (in-memory, per-session)
+        self._tool_result_cache: Dict[str, Any] = {}
+        self._cache_ttl = 300  # 5 minutes
+
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """
-        Get list of available tools from MCP Server
+        Get list of available tools from MCP Server.
+
+        Returns cached tools if already fetched during this session.
 
         Returns:
-            List of tool description dictionaries
+            List of tool description dictionaries with name, description, and schema.
         """
-        # StdIOStatefulClient automatically retrieves the tool list on connect
-        # Each tool's callable can be obtained via get_callable_function
+        # Use cached tools from parent's list_tools() call
+        if hasattr(self, "_cached_tools") and self._cached_tools:
+            return [
+                {
+                    "name": tool.name,
+                    "title": getattr(tool, "title", None),
+                    "description": getattr(tool, "description", ""),
+                    "inputSchema": tool.inputSchema,
+                }
+                for tool in self._cached_tools
+            ]
+
+        # If tools were not fetched via connect(), attempt sync fetch
+        if self.connected:
+            try:
+                loop = asyncio.new_event_loop()
+                tools = loop.run_until_complete(self.list_tools())
+                loop.close()
+                return [
+                    {
+                        "name": tool.name,
+                        "title": getattr(tool, "title", None),
+                        "description": getattr(tool, "description", ""),
+                        "inputSchema": tool.inputSchema,
+                    }
+                    for tool in tools
+                ]
+            except Exception as e:
+                logger.warning(f"Failed to fetch available tools: {e}")
+
         return []
 
-    def is_connected(self) -> bool:
-        """Check if connected to MCP Server"""
-        # Check underlying connection status
-        return hasattr(self, '_session') and self._session is not None
+    @property
+    def connected(self) -> bool:
+        """Check if connected to MCP Server.
+
+        Verifies both the connection flag and session liveliness.
+
+        Note: Parent class uses `self.is_connected = True` (instance attribute)
+        after connect(). We check __dict__ directly to avoid collision with
+        any class-level descriptor of the same name.
+        """
+        # Parent's is_connected boolean attribute (set to True after connect())
+        # Use __dict__ to read instance attribute directly (bypass descriptor)
+        parent_flag = self.__dict__.get('is_connected', False)
+        has_parent_conn = parent_flag is True
+        has_session = hasattr(self, 'session') and self.session is not None
+        return has_parent_conn and has_session
+
+    def connect_with_retry(self) -> bool:
+        """Connect to MCP server with exponential backoff retry.
+
+        Returns:
+            True if connection succeeded, False otherwise.
+        """
+        async def _do_connect():
+            try:
+                await self.connect()
+                # Also fetch tools on connect so get_available_tools() works
+                await self.list_tools()
+                return True
+            except Exception:
+                return False
+
+        last_error = None
+        for attempt in range(1, self._max_reconnect_attempts + 1):
+            try:
+                loop = asyncio.new_event_loop()
+                result = loop.run_until_complete(_do_connect())
+                loop.close()
+                if result:
+                    logger.info(f"MCP client connected (attempt {attempt})")
+                    return True
+            except Exception as e:
+                last_error = e
+                if attempt < self._max_reconnect_attempts:
+                    delay = self._base_reconnect_delay * (2 ** (attempt - 1))
+                    logger.warning(
+                        f"MCP connect failed (attempt {attempt}/{self._max_reconnect_attempts}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+
+        logger.error(f"MCP client failed to connect after {self._max_reconnect_attempts} attempts: {last_error}")
+        return False
+
+    def cached_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        """Call an MCP tool with result caching.
+
+        Args:
+            tool_name: Name of the MCP tool to call.
+            arguments: Arguments to pass to the tool.
+
+        Returns:
+            Tool call result (cached if within TTL).
+        """
+        cache_key = f"{tool_name}:{hash(frozenset(arguments.items()))}"
+        now = time.time()
+
+        if cache_key in self._tool_result_cache:
+            cached_time, cached_result = self._tool_result_cache[cache_key]
+            if now - cached_time < self._cache_ttl:
+                return cached_result
+
+        # Call the tool
+        async def _do_call():
+            func = await self.get_callable_function(tool_name, wrap_tool_result=False)
+            return await func(arguments)
+
+        try:
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(_do_call())
+            loop.close()
+            self._tool_result_cache[cache_key] = (now, result)
+            return result
+        except Exception as e:
+            logger.error(f"Tool call failed for '{tool_name}': {e}")
+            raise
 
 
 def create_github_mcp_client(

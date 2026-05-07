@@ -14,13 +14,14 @@ Note:
 - Uses runtime checks instead of ABC's abstract method checks
 """
 
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 from agentscope.agent import AgentBase
 from agentscope.message import Msg
 
 from src.core.config_manager import ConfigManager
 from src.core.logger import get_logger
+from src.core.token_utils import count_tokens, estimate_messages_tokens
 
 logger = get_logger(__name__)
 
@@ -160,6 +161,72 @@ Always be helpful, accurate, and provide actionable recommendations."""
             content=content,
             name=name or self.name,
         )
+
+    def _build_messages_with_token_budget(
+        self,
+        system_prompt: str,
+        user_query: str,
+        max_tokens: int = 7000,
+    ) -> List[dict]:
+        """
+        Build messages with automatic token budget management.
+
+        Truncates history from the front to keep within max_tokens.
+
+        Args:
+            system_prompt: System instruction text
+            user_query: Current user query
+            max_tokens: Maximum total tokens for the message list
+
+        Returns:
+            Message list within token budget
+        """
+        system_tokens = count_tokens(system_prompt)
+        query_tokens = count_tokens(user_query)
+        reserved = system_tokens + query_tokens + 100  # 100 token safety margin
+
+        if reserved > max_tokens:
+            logger.warning(
+                f"System + query tokens ({reserved}) exceed budget ({max_tokens}), "
+                "proceeding without history"
+            )
+            return [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_query},
+            ]
+
+        history_messages = self.memory.get_messages_for_prompt()
+        total = reserved + estimate_messages_tokens(history_messages)
+
+        if total <= max_tokens:
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(history_messages)
+            messages.append({"role": "user", "content": user_query})
+            return messages
+
+        # Truncate history from the front (keep most recent)
+        from src.core.token_utils import truncate_to_tokens
+        truncated = []
+        for msg in reversed(history_messages):
+            msg_text = f"{msg.get('role', '')}: {msg.get('content', '')}"
+            msg_tokens = count_tokens(msg_text)
+            if total + msg_tokens > max_tokens:
+                remaining = max_tokens - total
+                if remaining > 50:
+                    content = msg.get("content", "")
+                    truncated_content = truncate_to_tokens(content, remaining)
+                    msg = {**msg, "content": truncated_content}
+                    msg_text = f"{msg.get('role', '')}: {truncated_content}"
+                    msg_tokens = count_tokens(msg_text)
+                else:
+                    break
+            total += msg_tokens
+            truncated.append(msg)
+
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(reversed(truncated))
+        messages.append({"role": "user", "content": user_query})
+        return messages
 
     # -- AgentBase interface (must be implemented by subclasses) ---
 

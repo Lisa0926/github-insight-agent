@@ -23,6 +23,7 @@ from src.core.guardrails import sanitize_user_input, filter_sensitive_output, ci
 from src.core.kpi_tracker import KPITracker
 from src.core.logger import get_logger
 from src.core.studio_helper import StudioHelper, set_global_studio_config
+from src.core.tool_base import tools_to_prompt_text
 from src.tools.github_tool import GitHubTool
 from src.tools.github_toolkit import get_github_toolkit
 from src.agents.base_agent import GiaAgentBase
@@ -279,7 +280,35 @@ class ResearcherAgent(GiaAgentBase):
             self.toolkit = get_github_toolkit(config=self.config, use_mcp=use_mcp)
             logger.info("AgentScope Toolkit initialized with GitHub tools")
 
+        # Build dynamic intent prompt from toolkit schemas
+        self._dynamic_intent_prompt = self._build_dynamic_intent_prompt()
+
         logger.info(f"ResearcherAgent '{name}' initialized with model '{model_name}'")
+
+    def _build_dynamic_intent_prompt(self) -> str:
+        """Build intent system prompt from actual toolkit schemas."""
+        if self.toolkit is None:
+            return INTENT_SYSTEM_PROMPT
+
+        # Get toolkit tool descriptions as prompt text
+        try:
+            schemas = self.toolkit.get_json_schemas()
+            tool_names = []
+            for s in schemas:
+                fn = s.get("function", {})
+                tool_names.append(
+                    f"- **{fn.get('name', 'unknown')}**: {fn.get('description', '')}"
+                )
+            tools_section = "\n".join(tool_names)
+        except Exception as e:
+            logger.warning(f"Failed to build dynamic intent prompt: {e}")
+            return INTENT_SYSTEM_PROMPT
+
+        dynamic_prompt = INTENT_SYSTEM_PROMPT.replace(
+            "## 可用工具\n",
+            f"## 可用工具（动态注册）\n\n{tools_section}\n\n"
+        )
+        return dynamic_prompt
 
     def _calculate_trend_score(self, repo) -> float:
         """
@@ -362,7 +391,7 @@ class ResearcherAgent(GiaAgentBase):
 
             model_wrapper = self._get_model_wrapper()
             messages = [
-                {"name": "system", "content": INTENT_SYSTEM_PROMPT, "role": "system"},
+                {"name": "system", "content": self._dynamic_intent_prompt, "role": "system"},
                 {"name": "user", "content": safe_query, "role": "user"},
             ]
             response = model_wrapper(
@@ -868,12 +897,12 @@ class ResearcherAgent(GiaAgentBase):
         return result
 
     def _build_messages(self, user_query: str) -> List[Dict[str, Any]]:
-        """Build message history"""
-        messages = [{"name": "system", "content": self.system_prompt, "role": "system"}]
-        memory_messages = self.memory.get_messages_for_prompt()
-        messages.extend(memory_messages)
-        messages.append({"name": "user", "content": user_query, "role": "user"})
-        return messages
+        """Build message history with token budget management"""
+        return self._build_messages_with_token_budget(
+            system_prompt=self.system_prompt,
+            user_query=user_query,
+            max_tokens=7000,
+        )
 
     @trace(name="researcher.call_llm")
     def _call_llm(self, user_query: str) -> str:
