@@ -33,6 +33,7 @@ dist/
 htmlcov/
 *.cover
 coverage.xml
+test-results.xml
 
 # 日志
 logs/
