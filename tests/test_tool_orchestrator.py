@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """Tests for S3-P2: Tool→Tool Orchestration."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from src.core.tool_orchestrator import (
     ToolOrchestrator,
     get_builtin_pipelines,
     describe_pipeline,
-    PIPELINES,
 )
 
 

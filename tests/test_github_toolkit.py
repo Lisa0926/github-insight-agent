@@ -73,7 +73,7 @@ class TestToolResponseAdaptation:
         mock_instance = MagicMock()
         mock_tool_cls.return_value = mock_instance
 
-        toolkit = create_github_toolkit(use_mcp=False)
+        create_github_toolkit(use_mcp=False)
 
         # Import the registered function
         from agentscope.tool import ToolResponse

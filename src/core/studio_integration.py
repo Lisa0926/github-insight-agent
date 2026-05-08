@@ -2,59 +2,39 @@
 """
 AgentScope Studio integration for GIA
 
-Provides a silent agent that pushes messages to Studio via AgentScope's
-official hook mechanism (pre_print hook -> as_studio_forward_message).
+Provides a unified interface for pushing messages to AgentScope Studio.
+Uses HTTP-based forwarding (StudioHelper) for reliability — avoids asyncio.run()
+pitfalls with AgentScope's async AgentBase.print() method.
 
-This ensures Studio displays the exact same content as CLI output,
-with proper message format and token usage information.
+The HTTP approach is simpler and more reliable:
+- No event loop issues
+- Works regardless of async context
+- Directly calls Studio tRPC endpoints (same as StudioHelper)
 """
 
-import asyncio
-from typing import Optional
-
-from agentscope.agent import AgentBase
-from agentscope.message import Msg
-
-
-class _StudioPushAgent(AgentBase):
-    """Silent agent that only pushes messages to Studio (no terminal output)."""
-
-    def __init__(self, name: str = "GIA"):
-        super().__init__()
-        self.name = name
-        self.set_console_output_enabled(False)
-
-    def reply(self, msg: Msg) -> Msg:
-        return msg
-
-
-# Global singleton
-_studio_agent: Optional[_StudioPushAgent] = None
+from src.core.studio_helper import get_studio_helper
 
 
 def push_to_studio(sender: str, content: str, role: str = "assistant") -> None:
     """
-    Push a message to AgentScope Studio using the official hook mechanism.
+    Push a message to AgentScope Studio via HTTP forwarding.
 
-    This is the recommended way to send messages to Studio, as it ensures:
-    - Content matches CLI output exactly
-    - Proper AgentScope message format (content blocks, metadata, etc.)
-    - Token usage info can be included in metadata
+    Uses StudioHelper's HTTP-based forward_message() for reliability.
+    This avoids asyncio.run() issues with AgentScope's async print().
 
     Args:
         sender: Sender name (e.g., 'Researcher', 'Analyst', 'user')
         content: Message content
         role: Message role ('user' or 'assistant')
     """
-    global _studio_agent
-    if _studio_agent is None:
-        _studio_agent = _StudioPushAgent()
+    helper = get_studio_helper()
+    if helper is None:
+        return  # Studio not configured — silent graceful degradation
 
-    msg = Msg(name=sender, content=content, role=role)
     try:
-        asyncio.run(_studio_agent.print(msg))
+        helper.forward_message(name=sender, content=content, role=role)
     except Exception:
-        pass  # Graceful degradation - does not affect main flow
+        pass  # Graceful degradation — does not affect main flow
 
 
 def flush_traces() -> None:

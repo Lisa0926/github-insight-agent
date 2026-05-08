@@ -109,7 +109,7 @@ class TestPRReviewToolCoverage:
 
     def test_reviewer_llm_review_unavailable(self):
         """Test _llm_review when LLM provider is None."""
-        with patch('src.tools.pr_review_tool.OWASPRuleEngine') as mock_engine_cls, \
+        with patch('src.tools.pr_review_tool.OWASPRuleEngine'), \
              patch('src.tools.pr_review_tool.get_provider', return_value=None):
             reviewer = PRReviewer.__new__(PRReviewer)
             reviewer._owasp_engine = MagicMock()

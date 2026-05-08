@@ -95,6 +95,7 @@ class DashScopeWrapper:
                 return ChatResponse(
                     content=error_text,
                     usage=ChatUsage(input_tokens=0, output_tokens=0, time=0),
+                    metadata={"error": error_text},
                 )
 
             # Extract message from response
@@ -142,9 +143,11 @@ class DashScopeWrapper:
 
         except Exception as e:
             logger.error(f"DashScope generation failed: {e}")
+            error_text = f"Error: {str(e)}"
             return ChatResponse(
-                content=f"Error: {str(e)}",
+                content=error_text,
                 usage=ChatUsage(input_tokens=0, output_tokens=0, time=0),
+                metadata={"error": error_text},
             )
 
     def extract_tool_calls(self, response) -> List[Dict[str, Any]]:

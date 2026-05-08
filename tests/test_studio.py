@@ -8,9 +8,9 @@ class TestStudioIntegration:
     """Test src/core/studio_integration.py"""
 
     def test_push_to_studio_no_crash(self):
-        """push_to_studio should not crash even if asyncio fails."""
+        """push_to_studio should not crash even if Studio is not configured."""
         from src.core.studio_integration import push_to_studio
-        # Should not raise
+        # Should not raise — Studio is not configured
         push_to_studio("test_sender", "test content", "assistant")
 
     def test_push_to_studio_with_user_role(self):
@@ -23,22 +23,20 @@ class TestStudioIntegration:
         # Should not raise even without opentelemetry
         flush_traces()
 
-    def test_studio_push_agent_creation(self):
-        """Test _StudioPushAgent can be instantiated."""
-        from src.core.studio_integration import _StudioPushAgent
-        agent = _StudioPushAgent(name="test")
-        assert agent.name == "test"
-
-    def test_studio_push_agent_reply(self):
-        """Test _StudioPushAgent.reply() returns msg unchanged."""
-        from src.core.studio_integration import _StudioPushAgent
-        from agentscope.message import Msg
-        agent = _StudioPushAgent()
-        msg = Msg(name="test", content="hello", role="user")
-        result = agent.reply(msg)
-        # reply() might return a coroutine in newer AgentScope versions
-        # Just verify it doesn't crash — the actual return depends on AgentScope internals
-        assert result is not None or msg is not None
+    def test_push_to_studio_with_helper(self):
+        """push_to_studio should forward via StudioHelper when configured."""
+        from src.core import studio_helper
+        original = studio_helper._studio_helper
+        try:
+            mock_helper = MagicMock()
+            studio_helper._studio_helper = mock_helper
+            from src.core.studio_integration import push_to_studio
+            push_to_studio("agent", "content", "assistant")
+            mock_helper.forward_message.assert_called_once_with(
+                name="agent", content="content", role="assistant"
+            )
+        finally:
+            studio_helper._studio_helper = original
 
 
 class TestStudioHelper:
@@ -130,8 +128,7 @@ class TestStudioIntegrationGlobalReset:
     """Reset global state after studio tests."""
 
     def teardown_method(self):
-        from src.core import studio_helper, studio_integration
+        from src.core import studio_helper
         studio_helper._studio_helper = None
         studio_helper._studio_url = None
         studio_helper._run_id = None
-        studio_integration._studio_agent = None

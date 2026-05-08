@@ -75,8 +75,7 @@ class TestSpanAttributes:
 
     def test_span_timer_context_manager(self):
         """SpanTimer records elapsed time as attribute."""
-        import time
-        from src.core.span_attributes import SpanTimer, set_span_attribute
+        from src.core.span_attributes import SpanTimer
 
         # Track what attributes were set
         captured = {}
@@ -343,12 +342,9 @@ class TestResearcherAgentTotalCountFix:
                 mock_set("researcher.result_count", len(repos))
                 mock_set("researcher.total_found", len(repos))  # Fixed: was total_count
 
-
-                # Verify all attributes were set
-                assert set_span_attrs["researcher.total_found"] == len(repos)
-                assert set_span_attrs["researcher.result_count"] == len(repos)
-            except NameError:
-                pytest.fail("NameError raised — total_count fix not applied!")
+            # Verify all attributes were set
+            assert set_span_attrs["researcher.total_found"] == len(repos)
+            assert set_span_attrs["researcher.result_count"] == len(repos)
 
 
 # ============================================================

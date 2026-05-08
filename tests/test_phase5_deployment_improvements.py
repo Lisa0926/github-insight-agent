@@ -7,11 +7,7 @@ Tests for Phase 5 deployment improvements:
 - Summary quality validation (summary_quality.py)
 """
 
-import json
-import os
-import tempfile
 import time
-from unittest.mock import patch
 
 import pytest
 
@@ -21,7 +17,6 @@ from src.core.prompt_ab_test import (
     PromptABTester,
     ExperimentStatus,
     Winner,
-    ExperimentReport,
 )
 from src.core.summary_quality import (
     _extract_keywords,
@@ -364,8 +359,8 @@ class TestPromptABTester:
         assert exp.status == ExperimentStatus.CONCLUDED.value
 
     def test_get_all_reports(self, tester):
-        e1 = tester.create_experiment("researcher", "A", "B")
-        e2 = tester.create_experiment("analyst", "A", "B")
+        tester.create_experiment("researcher", "A", "B")
+        tester.create_experiment("analyst", "A", "B")
         reports = tester.get_all_reports()
         assert len(reports) == 2
 

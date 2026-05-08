@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for LLM-based conversation compression."""
 
-import json
 from src.core.conversation import ConversationManager
 from src.core.agentscope_memory import AgentScopeMemory
 

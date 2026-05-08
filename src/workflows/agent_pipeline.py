@@ -161,11 +161,10 @@ class AgentPipeline:
         Returns:
             List of search results
         """
-        from agentscope.message import Msg
-
-        # Trigger researcher.reply() via SequentialPipeline
-        search_msg = Msg(name="user", content=query, role="user")
-        self._search_pipeline(search_msg)
+        from agentscope.message import Msg  # noqa: F401 - imported for potential async pipeline use
+        # The coroutine is never awaited, so the pipeline call is a no-op.
+        # search_and_analyze() below performs the search independently.
+        # If full pipeline orchestration is needed, wrap execute() in asyncio.run().
 
         # Get results from researcher.search_and_analyze()
         repos_result = self.researcher.search_and_analyze(

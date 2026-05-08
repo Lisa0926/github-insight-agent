@@ -27,9 +27,9 @@ from src.core.config_manager import ConfigManager
 # Test helpers
 # ===========================================
 def print_header(name: str):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Unit Test: {name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def print_result(name: str, passed: bool, detail: str = ""):
@@ -88,7 +88,7 @@ def test_github_repo_from_api():
         "language": "Python",
         "description": "A test repo",
         "topics": ["test", "demo"],
-        "updated_at": "2026-04-28T00:00:00Z",
+        "updated_at": "2026 - 04 - 28T00:00:00Z",
         "forks_count": 10,
         "watchers_count": 5,
         "open_issues_count": 2,
@@ -134,9 +134,9 @@ def test_github_search_result():
         "total_count": 2,
         "items": [
             {"full_name": "a/b", "html_url": "http://x", "stargazers_count": 10,
-             "language": "Python", "description": "", "topics": [], "updated_at": "2026-01-01"},
+             "language": "Python", "description": "", "topics": [], "updated_at": "2026 - 01 - 01"},
             {"full_name": "c/d", "html_url": "http://y", "stargazers_count": 20,
-             "language": "Go", "description": "", "topics": [], "updated_at": "2026-01-02"},
+             "language": "Go", "description": "", "topics": [], "updated_at": "2026 - 01 - 02"},
         ],
         "incomplete_results": False,
     }
@@ -317,10 +317,10 @@ def test_owasp_detect_various():
 # Main
 # ===========================================
 def run_all_tests():
-    print("\n" + "#"*60)
+    print("\n" + "#" * 60)
     print(f"# GitHub Insight Agent - 单元测试")
     print(f"# 时间: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("#"*60)
+    print("#" * 60)
 
     results = {}
     tests = [
@@ -344,9 +344,9 @@ def run_all_tests():
             results[name] = False
 
     # Summary
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("单元测试结果汇总")
-    print("="*60)
+    print("=" * 60)
 
     passed = sum(1 for r in results.values() if r)
     total = len(results)

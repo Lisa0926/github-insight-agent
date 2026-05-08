@@ -115,6 +115,17 @@ Always be helpful, accurate, and provide actionable recommendations."""
 
         return self._model_wrapper
 
+    def _is_response_error(self, response) -> bool:
+        """Check if a model response indicates an API error."""
+        if isinstance(response, dict):
+            metadata = response.get("metadata") or {}
+            if metadata.get("error"):
+                return True
+            content = response.get("content", "")
+            if isinstance(content, str) and content.startswith("DashScope API error:"):
+                return True
+        return False
+
     def _extract_response_text(self, response) -> str:
         """
         Extract text content from a model response

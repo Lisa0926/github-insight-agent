@@ -6,11 +6,9 @@
 """
 
 import json
-import os
-import time
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ============================================================
@@ -238,8 +236,6 @@ class TestAuditLogger:
 
     def test_sanitize_triggers_audit_log(self, tmp_path):
         """Test that injection detection writes to audit log."""
-        from src.core.guardrails import _AuditLogger, _audit_logger
-
         # Temporarily replace the global audit logger
         audit_logger = self._make_audit_log(tmp_path)
         import src.core.guardrails as guardrails
@@ -271,7 +267,6 @@ class TestAuditLogger:
     def test_audit_log_chinese_injection(self, tmp_path):
         """Test Chinese injection also logged."""
         from src.core.guardrails import sanitize_user_input
-        from src.core.guardrails import _AuditLogger
         import src.core.guardrails as guardrails
 
         audit_logger = self._make_audit_log(tmp_path)
@@ -298,7 +293,6 @@ class TestAuditLogger:
     def test_audit_log_input_hash_is_consistent(self, tmp_path):
         """Same input should produce same hash."""
         from src.core.guardrails import sanitize_user_input
-        from src.core.guardrails import _AuditLogger
         import src.core.guardrails as guardrails
 
         audit_logger = self._make_audit_log(tmp_path)
@@ -334,7 +328,6 @@ class TestGuardrailsIntegration:
     def test_approval_manager_with_callback_and_audit(self, tmp_path):
         """Test HITL approval with callback and audit logging."""
         from src.core.guardrails import HumanApprovalManager
-        from src.core.guardrails import _AuditLogger
         import src.core.guardrails as guardrails
 
         audit_logger = self._make_audit_log(tmp_path)

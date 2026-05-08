@@ -29,9 +29,9 @@ from src.core.config_manager import ConfigManager
 
 def test_basic_write_read():
     """测试 1: 基本写入和读取"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 1: 基本写入和读取")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_basic.db"
     if os.path.exists(db_path):
@@ -69,9 +69,9 @@ def test_basic_write_read():
 
 def test_cross_instance_persistence():
     """测试 2: 跨实例持久化（模拟重启）"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 2: 跨实例持久化")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_persistence.db"
     if os.path.exists(db_path):
@@ -104,9 +104,9 @@ def test_cross_instance_persistence():
 
 def test_memory_compression():
     """测试 3: 记忆压缩机制"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 3: 记忆压缩机制")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_compression.db"
     if os.path.exists(db_path):
@@ -140,9 +140,9 @@ def test_memory_compression():
 
 def test_agent_integration():
     """Test 4: Agent Integration Test"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 4: Agent 集成测试")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_agent.db"
     if os.path.exists(db_path):
@@ -192,9 +192,9 @@ def test_agent_integration():
 
 def test_multi_session_isolation():
     """测试 5: 多会话隔离"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 5: 多会话隔离")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_multisession.db"
     if os.path.exists(db_path):
@@ -231,9 +231,9 @@ def test_multi_session_isolation():
 
 def test_database_file_inspection():
     """测试 6: 数据库文件检查"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 6: 数据库文件检查")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_agent.db"
 
@@ -280,10 +280,10 @@ def test_database_file_inspection():
 
 def run_all_tests():
     """运行所有测试"""
-    print("\n" + "#"*60)
+    print("\n" + "#" * 60)
     print(f"# GitHub Insight Agent - 持久化存储测试")
     print(f"# 时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("#"*60)
+    print("#" * 60)
 
     results = {}
 
@@ -307,9 +307,9 @@ def run_all_tests():
             traceback.print_exc()
 
     # 汇总结果
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试结果汇总")
-    print("="*60)
+    print("=" * 60)
 
     passed = sum(1 for r in results.values() if r)
     total = len(results)

@@ -33,9 +33,9 @@ logger = get_logger(__name__)
 # ===========================================
 def test_config_loading():
     """测试配置加载"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 1: 配置加载测试")
-    print("="*60)
+    print("=" * 60)
 
     config = ConfigManager()
 
@@ -90,9 +90,9 @@ def test_config_loading():
 # ===========================================
 def test_database_persistence():
     """测试本地数据库持久化"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 2: 本地数据库持久化测试")
-    print("="*60)
+    print("=" * 60)
 
     db_path = "data/test_integration.db"
     if os.path.exists(db_path):
@@ -178,9 +178,9 @@ def test_database_persistence():
 # ===========================================
 def test_github_mcp_connection():  # noqa: C901
     """测试 GitHub MCP Server 连接"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 3: GitHub MCP Server 连接测试")
-    print("="*60)
+    print("=" * 60)
 
     config = ConfigManager()
 
@@ -315,9 +315,9 @@ def test_github_mcp_connection():  # noqa: C901
 # ===========================================
 def test_end_to_end():  # noqa: C901
     """端到端集成测试"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("测试 4: 端到端集成测试")
-    print("="*60)
+    print("=" * 60)
 
     config = ConfigManager()
     db_path = "data/test_e2e.db"
@@ -434,10 +434,10 @@ def test_end_to_end():  # noqa: C901
 # ===========================================
 def run_all_tests():
     """运行所有集成测试"""
-    print("\n" + "#"*60)
+    print("\n" + "#" * 60)
     print(f"# GitHub Insight Agent - 集成测试")
     print(f"# 时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("#"*60)
+    print("#" * 60)
 
     results = {}
 
@@ -458,9 +458,9 @@ def run_all_tests():
             traceback.print_exc()
 
     # 汇总报告
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("集成测试结果汇总")
-    print("="*60)
+    print("=" * 60)
 
     passed = sum(1 for r in results.values() if r)
     total = len(results)
@@ -480,12 +480,12 @@ def run_all_tests():
         print(f"  {f}: {size:,} 字节")
 
     # 最终判断
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     if passed == total:
         print("✓ 所有测试通过！GitHub MCP Server 和本地数据库工作正常。")
     else:
         print(f"⚠ {total - passed} 个测试未通过，请检查相关配置。")
-    print("="*60)
+    print("=" * 60)
 
     return passed == total
 

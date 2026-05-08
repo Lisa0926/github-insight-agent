@@ -41,9 +41,9 @@ from src.core.conversation import ConversationManager
 # Test helpers
 # ===========================================
 def print_header(name: str):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"测试: {name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def print_result(name: str, passed: bool, detail: str = ""):
@@ -653,10 +653,10 @@ code = "hello"
 # ===========================================
 def run_all_tests():
     """运行所有补充测试"""
-    print("\n" + "#"*60)
+    print("\n" + "#" * 60)
     print(f"# GitHub Insight Agent - 补充测试 (Mission Part 1)")
     print(f"# 时间: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("#"*60)
+    print("#" * 60)
 
     results = {}
 
@@ -681,9 +681,9 @@ def run_all_tests():
             traceback.print_exc()
 
     # 汇总报告
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("补充测试结果汇总")
-    print("="*60)
+    print("=" * 60)
 
     passed = sum(1 for r in results.values() if r)
     total = len(results)

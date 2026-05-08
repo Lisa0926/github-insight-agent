@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for S3-P1: AgentScope native function calling."""
 
-import json
 from unittest.mock import patch, MagicMock
 
 from agentscope.message._message_block import ToolUseBlock
@@ -190,6 +189,7 @@ class TestResearcherAgentNativeTools:
 
         agent = MagicMock()
         # Use a real object as github_tool so hasattr returns False for missing attrs
+
         class DummyTool:
             pass
         agent.github_tool = DummyTool()

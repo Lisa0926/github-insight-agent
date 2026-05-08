@@ -789,6 +789,16 @@ class ResearcherAgent(GiaAgentBase):
                 max_tokens=512,
                 temperature=0.1,  # Low temperature for consistent output
             )
+            # Check if the response indicates an API error
+            if self._is_response_error(response):
+                logger.warning(
+                    f"LLM returned API error during intent understanding: "
+                    f"{self._extract_response_text(response)[:200]}"
+                )
+                return {
+                    "action": "search_repositories",
+                    "params": {"query": user_query, "sort": "stars", "limit": 5},
+                }
             content = self._extract_response_text(response).strip()
 
             # Extract JSON from response
@@ -810,9 +820,11 @@ class ResearcherAgent(GiaAgentBase):
 
         except Exception as e:
             logger.warning(f"Intent understanding failed: {e}")
+            # Instead of falling back to "chat", fall back to "search_repositories"
+            # with the raw query — this ensures the user's search intent is still honored
             return {
-                "action": "chat",
-                "params": {"message": user_query},
+                "action": "search_repositories",
+                "params": {"query": user_query, "sort": "stars", "limit": 5},
             }
 
     def _execute_search(self, params: Dict[str, Any]) -> str:

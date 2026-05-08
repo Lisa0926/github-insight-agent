@@ -275,14 +275,21 @@ class AnalystAgent(GiaAgentBase):
         try:
             model_wrapper = self._get_model_wrapper()
 
+            # Truncate to stay within model context window (30720 tokens for qwen-max)
+            # Reserve ~8000 tokens for system prompt + response, ~22000 for input
+            max_readme_chars = 15000
+            max_info_chars = 5000
+            truncated_readme = readme_content[:max_readme_chars] if readme_content else ""
+            truncated_info = project_info[:max_info_chars] if project_info else ""
+
             # Build prompt
             prompt = f"""你是一个资深技术架构师，请深入分析以下 GitHub 项目并提取关键信息。
 
 ## 项目信息
-{project_info}
+{truncated_info}
 
 ## README 内容
-{readme_content[:4000]}
+{truncated_readme}
 
 请从以下维度进行深度分析：
 
@@ -330,6 +337,13 @@ class AnalystAgent(GiaAgentBase):
             ]
 
             response = model_wrapper(messages=messages)
+
+            # Check if the response indicates an API error
+            if self._is_response_error(response):
+                error_text = self._extract_response_text(response)
+                logger.error(f"LLM analysis returned API error: {error_text[:200]}")
+                return self._fallback_analysis(project_info)
+
             content = self._extract_response_text(response)
 
             # Filter sensitive data from LLM output
@@ -343,7 +357,49 @@ class AnalystAgent(GiaAgentBase):
 
         except Exception as e:
             logger.error(f"LLM analysis failed: {e}")
-            return {"error": f"Analysis failed: {e}"}
+            return self._fallback_analysis(project_info)
+
+    def _fallback_analysis(self, project_info: str) -> Dict[str, Any]:
+        """Return a minimal analysis using available project metadata when LLM fails."""
+        lang = "Unknown"
+        lang_match = re.search(r"- 编程语言：(.+)", project_info)
+        if lang_match:
+            lang = lang_match.group(1).strip()
+
+        name = "Unknown"
+        name_match = re.search(r"- 项目名称：(.+)", project_info)
+        if name_match:
+            name = name_match.group(1).strip()
+
+        desc = ""
+        desc_match = re.search(r"- 简介：(.+)", project_info)
+        if desc_match:
+            desc = desc_match.group(1).strip()
+
+        return {
+            "core_function": desc or "Unable to determine (LLM analysis unavailable)",
+            "tech_stack": {
+                "language": lang,
+                "frameworks": [],
+                "key_dependencies": [],
+            },
+            "architecture_pattern": "Unknown",
+            "pain_points_solved": [f"Unable to determine detailed analysis for {name}"],
+            "unique_value": "LLM analysis unavailable due to API error",
+            "risk_flags": ["LLM API unavailable — analysis incomplete"],
+            "suitability_score": 0.5,
+            "score_breakdown": {
+                "functionality": 0.5,
+                "code_quality": 0.5,
+                "security": 0.5,
+                "maintainability": 0.5,
+                "community": 0.5,
+            },
+            "maturity_assessment": "unknown",
+            "recommendation": "Analysis incomplete due to LLM API error. Please try again later.",
+            "competitive_analysis": "N/A",
+            "_llm_error": True,
+        }
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         """
@@ -544,6 +600,8 @@ class AnalystAgent(GiaAgentBase):
             # Build existing analysis as JSON for context
             import json as _json
             existing_json = _json.dumps(analysis, ensure_ascii=False, indent=2)
+            # Truncate to stay within context window
+            existing_json = existing_json[:8000]
 
             prompt = f"""你是一位资深技术架构师，请修复以下分析结果中存在的问题。
 
@@ -553,10 +611,10 @@ class AnalystAgent(GiaAgentBase):
 ```
 
 ## 存在的问题
-{issues_text}
+{issues_text[:1000]}
 
 ## 项目信息（用于事实核对）
-{project_info}
+{project_info[:3000]}
 
 请修复上述问题，并严格按照以下 JSON 格式输出修正后的完整结果（只输出 JSON，不要其他内容）：
 ```json
@@ -592,6 +650,12 @@ class AnalystAgent(GiaAgentBase):
             ]
 
             response = model_wrapper(messages=messages)
+
+            # Check for API errors
+            if self._is_response_error(response):
+                logger.warning("Fix analysis: LLM returned API error, keeping original")
+                return None
+
             content = self._extract_response_text(response)
             content = filter_sensitive_output(content)
 

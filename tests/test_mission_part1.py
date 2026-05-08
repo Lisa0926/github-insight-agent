@@ -50,7 +50,7 @@ def test_persistent_memory_init():
     tables = [row[0] for row in cursor.fetchall()]
     conn.close()
 
-    assert "agent_messages" in tables or "message" in tables,         f"Expected table not found, tables: {tables}"
+    assert "agent_messages" in tables or "message" in tables, f"Expected table not found, tables: {tables}"
     print(f"  ✓ 数据库文件创建成功: {db_path}")
     print(f"  ✓ 数据表存在: {tables}")
 
@@ -92,7 +92,7 @@ def test_conversation_history_table():
                 print(f"  表 {table}: {col_names}")
 
                 # Verify core columns exist (at minimum: id, role, content)
-                assert "id" in col_names or len(col_names) > 0,                     f"Table {table} missing essential columns"
+                assert "id" in col_names or len(col_names) > 0, f"Table {table} missing essential columns"
                 print(f"  ✓ 表 {table} 结构完整")
                 break
         except sqlite3.OperationalError:
@@ -323,10 +323,7 @@ def test_owasp_self_scan():
 
     # Scan critical files
     scan_targets = [
-        "src/tools/github_tool.py",
-        "src/core/config_manager.py",
-        "src/web/dashboard_api.py",
-    ]
+        "src/tools/github_tool.py", "src/core/config_manager.py", "src/web/dashboard_api.py", ]
 
     all_issues = []
     for target in scan_targets:
@@ -371,8 +368,7 @@ def test_resilient_http_full_path():
     print("=" * 60)
 
     from src.core.resilient_http import (  # noqa: F401
-        ResilientHTTPClient, RateLimitError,
-        CircuitBreakerError, ServerError
+        ResilientHTTPClient, RateLimitError, CircuitBreakerError, ServerError
     )
 
     # Test 1: Rate limit handling with Retry-After header
@@ -402,8 +398,7 @@ def test_resilient_http_full_path():
 
     # Test 3: Circuit breaker with recovery timeout
     client2 = ResilientHTTPClient(
-        circuit_breaker_threshold=2,
-        circuit_breaker_timeout=0  # Immediate recovery
+        circuit_breaker_threshold=2, circuit_breaker_timeout=0  # Immediate recovery
     )
 
     for _ in range(2):
@@ -537,20 +532,7 @@ def run_all_tests():
     print("#" * 60)
 
     tests = [
-        ("Memory 初始化", test_persistent_memory_init),
-        ("表结构完整性", test_conversation_history_table),
-        ("写入后立即读取", test_write_read_immediate),
-        ("GC 无内存泄漏", test_gc_no_memory_leak),
-        ("MCP 客户端初始化", test_mcp_client_init),
-        ("MCP 健康检查", test_mcp_health_check),
-        ("MCP 工具路由", test_mcp_tool_routing),
-        ("MCP 断线重连", test_mcp_reconnect),
-        ("OWASP 自扫描", test_owasp_self_scan),
-        ("ResilientHTTP 完整路径", test_resilient_http_full_path),
-        ("Memory 压缩机制", test_memory_compression),
-        ("跨实例持久化", test_memory_cross_instance),
-        ("State dict 保存/恢复", test_memory_state_dict),
-    ]
+        ("Memory 初始化", test_persistent_memory_init), ("表结构完整性", test_conversation_history_table), ("写入后立即读取", test_write_read_immediate), ("GC 无内存泄漏", test_gc_no_memory_leak), ("MCP 客户端初始化", test_mcp_client_init), ("MCP 健康检查", test_mcp_health_check), ("MCP 工具路由", test_mcp_tool_routing), ("MCP 断线重连", test_mcp_reconnect), ("OWASP 自扫描", test_owasp_self_scan), ("ResilientHTTP 完整路径", test_resilient_http_full_path), ("Memory 压缩机制", test_memory_compression), ("跨实例持久化", test_memory_cross_instance), ("State dict 保存/恢复", test_memory_state_dict), ]
 
     results = {}
     for name, test_func in tests:
