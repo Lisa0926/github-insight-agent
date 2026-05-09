@@ -1107,7 +1107,12 @@ Respond with JSON ONLY:
             if tech:
                 lang = tech.get("language", "")
                 if lang and lang != "N/A":
-                    languages[lang] = languages.get(lang, 0) + 1
+                    if isinstance(lang, list):
+                        for item in lang:
+                            if item and item != "N/A":
+                                languages[item] = languages.get(item, 0) + 1
+                    else:
+                        languages[lang] = languages.get(lang, 0) + 1
                 for fw in tech.get("frameworks", []):
                     frameworks[fw] = frameworks.get(fw, 0) + 1
         return languages, frameworks
