@@ -99,9 +99,19 @@ class DashScopeWrapper:
                 )
 
             # Extract message from response
+            # Without tools: API returns choices=None with text at output.text
+            # With tools: API returns choices with tool_calls in message
             message = resp.output.choices[0].message if resp.output.choices else {}
-            text_content = message.get("text", "") if isinstance(message, dict) else ""
-            tool_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
+            if isinstance(message, dict):
+                text_content = message.get("text", "")
+                tool_calls = message.get("tool_calls", [])
+            else:
+                text_content = ""
+                tool_calls = []
+
+            # Fallback to output.text when choices is None/empty
+            if not text_content and hasattr(resp.output, "text") and resp.output.text:
+                text_content = resp.output.text
 
             # Extract usage
             resp_usage = getattr(resp, "usage", None)

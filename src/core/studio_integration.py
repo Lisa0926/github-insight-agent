@@ -42,6 +42,10 @@ def flush_traces() -> None:
     try:
         from opentelemetry import trace as otel_trace
         provider = otel_trace.get_tracer_provider()
+        # Flush all batched spans before shutdown
+        for handler in getattr(provider, "_span_processors", []):
+            if hasattr(handler, "force_flush"):
+                handler.force_flush(timeout_millis=3000)
         if hasattr(provider, "shutdown"):
             provider.shutdown()
     except Exception:

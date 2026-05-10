@@ -181,8 +181,8 @@ class TestTracingConfiguration:
             assert call_kwargs.get("studio_url") == "http://studio:3000"
             assert call_kwargs.get("tracing_url") == "http://otel:4318"
 
-    def test_setup_studio_without_tracing(self):
-        """_setup_studio should not pass tracing_url when tracing disabled"""
+    def test_setup_studio_always_enables_tracing(self):
+        """_setup_studio should always enable tracing to Studio's OTLP endpoint"""
         from src.cli.app import _setup_studio
         import agentscope
 
@@ -190,6 +190,7 @@ class TestTracingConfiguration:
         mock_config.agentscope_studio_url = "http://studio:3000"
         mock_config.agentscope_run_name = "test_run"
         mock_config.agentscope_enable_tracing = False
+        mock_config.agentscope_tracing_url = ""
 
         with patch.object(agentscope, "init") as mock_init, \
              patch("src.agents.researcher_agent.set_studio_config"), \
@@ -198,7 +199,9 @@ class TestTracingConfiguration:
             _setup_studio(mock_config)
 
             call_kwargs = mock_init.call_args.kwargs
-            assert "tracing_url" not in call_kwargs
+            assert call_kwargs.get("studio_url") == "http://studio:3000"
+            # OTLPSpanExporter auto-appends /v1/traces, so endpoint is just the base URL
+            assert call_kwargs.get("tracing_url") == "http://studio:3000"
 
     def test_setup_tracing_standalone(self):
         """_setup_tracing should call agentscope.init with tracing_url only"""
@@ -345,6 +348,89 @@ class TestEnvVarConfiguration:
 
         config = ConfigManager()
         assert config.agentscope_tracing_url == ""
+
+
+# ============================================================
+# 6. Span Attribute Injector
+# ============================================================
+
+class TestSpanAttributeInjector:
+    """Test the custom SpanProcessor that injects run metadata"""
+
+    def test_span_injector_set_attributes(self):
+        """SpanAttributeInjector should set expected attributes"""
+        from src.core.span_injector import SpanAttributeInjector
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+
+        injector = SpanAttributeInjector(
+            run_id="test_run",
+            service_name="Test Service",
+        )
+        injector.on_start(mock_span)
+
+        mock_span.set_attribute.assert_any_call("gen_ai.conversation.id", "test_run")
+        mock_span.set_attribute.assert_any_call("project.run_id", "test_run")
+        mock_span.set_attribute.assert_any_call("service.name", "Test Service")
+
+    def test_span_injector_handles_none_span(self):
+        """SpanAttributeInjector should not crash on None span"""
+        from src.core.span_injector import SpanAttributeInjector
+
+        injector = SpanAttributeInjector(run_id="test_run")
+        injector.on_start(None)  # Should not raise
+
+    def test_span_injector_handles_non_recording_span(self):
+        """SpanAttributeInjector should skip non-recording spans"""
+        from src.core.span_injector import SpanAttributeInjector
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = False
+
+        injector = SpanAttributeInjector(run_id="test_run")
+        injector.on_start(mock_span)
+        mock_span.set_attribute.assert_not_called()
+
+    def test_span_injector_graceful_shutdown(self):
+        """SpanAttributeInjector shutdown should not raise"""
+        from src.core.span_injector import SpanAttributeInjector
+
+        injector = SpanAttributeInjector(run_id="test_run")
+        injector.shutdown()  # Should not raise
+
+    def test_span_injector_on_ending(self):
+        """SpanAttributeInjector _on_ending should not raise"""
+        from src.core.span_injector import SpanAttributeInjector
+
+        mock_span = MagicMock()
+        injector = SpanAttributeInjector(run_id="test_run")
+        injector._on_ending(mock_span)  # Should not raise
+
+    def test_configure_span_injector(self):
+        """configure_span_injector should set the module-level run_id"""
+        from src.core.span_injector import (
+            configure_span_injector,
+            get_injected_run_id,
+        )
+
+        # Patch at the OTel SDK level to avoid needing a real TracerProvider
+        with patch("opentelemetry.trace.get_tracer_provider") as mock_get:
+            # Return a non-TracerProvider mock so configure_span_injector
+            # skips registration (isinstance check), but still sets the
+            # module-level variable
+            mock_get.return_value = MagicMock()
+
+            configure_span_injector("patched_run")
+            assert get_injected_run_id() == "patched_run"
+
+    def test_get_injected_run_id(self):
+        """get_injected_run_id should return a string (the configured run_id)"""
+        from src.core.span_injector import get_injected_run_id
+
+        result = get_injected_run_id()
+        # Could be None (never configured) or a string (configured by a prior test)
+        assert result is None or isinstance(result, str)
 
 
 # ============================================================

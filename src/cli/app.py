@@ -18,7 +18,6 @@ sys.path.insert(0, str(project_root))
 
 from src.cli.cli_renderer import renderer  # noqa: E402
 from src.cli.interactive_cli import cli  # noqa: E402
-from src.cli.natural_language_parser import NaturalLanguageParser, IntentType  # noqa: E402
 from src.core.guardrails import sanitize_user_input  # noqa: E402
 from src.core.guardrails import get_approval_manager  # noqa: E402
 from src.core.feedback import get_feedback_collector, FeedbackSession  # noqa: E402
@@ -53,6 +52,12 @@ def _setup_tracing(config: ConfigManager) -> None:
             project="GitHub Insight Agent",
             tracing_url=tracing_url,
         )
+        # Register span attribute injector for standalone tracing too
+        from src.core.span_injector import configure_span_injector
+        configure_span_injector(
+            config.agentscope_run_name,
+            "GitHub Insight Agent",
+        )
         print(f"[Tracing] Enabled (endpoint: {tracing_url})")
     except Exception as e:
         print(f"[Tracing] Failed to init: {e}")
@@ -62,7 +67,18 @@ def _setup_studio(config: ConfigManager) -> None:
     """Initialize AgentScope Studio connection with tracing."""
     studio_url = config.agentscope_studio_url
     run_name = config.agentscope_run_name
-    tracing_url = config.agentscope_tracing_url if config.agentscope_enable_tracing else None
+
+    # Determine tracing URL:
+    # 1. User-specified via AGENTSCOPE_TRACING_URL (highest priority)
+    # 2. Studio base URL (OTLPSpanExporter auto-appends /v1/traces)
+    # 3. None (no tracing)
+    if config.agentscope_tracing_url:
+        tracing_url = config.agentscope_tracing_url
+    elif config.agentscope_enable_tracing:
+        tracing_url = studio_url
+    else:
+        # Always enable tracing to Studio when Studio is reachable
+        tracing_url = studio_url
 
     # Check if Studio server is reachable before initializing
     studio_reachable = _check_studio_reachable(studio_url)
@@ -80,6 +96,11 @@ def _setup_studio(config: ConfigManager) -> None:
         agentscope.init(**init_kwargs)
     except Exception as e:
         print(f"[Studio] Failed to init: {e}")
+
+    # Register span attribute injector to link spans to the run
+    # (gen_ai.conversation.id is required by Studio's trace viewer)
+    from src.core.span_injector import configure_span_injector
+    configure_span_injector(run_name)
 
     # Set custom studio config for agents
     from src.agents.researcher_agent import set_studio_config as set_researcher_studio
@@ -229,7 +250,6 @@ def check_environment():
 def run_interactive_mode():  # noqa: C901
     """Run interactive mode"""
     config = ConfigManager()
-    nl_parser = NaturalLanguageParser()
 
     # Set up Studio connection (registers hooks + custom forwarding)
     if config.agentscope_enable_studio:
@@ -511,211 +531,181 @@ def run_interactive_mode():  # noqa: C901
                     renderer.print_error(f"未知命令：{command}", "输入 /help 查看可用命令")
 
             else:
-                # Natural language input - intelligent intent recognition
-                # Sanitize user input to prevent prompt injection
+                # Natural language input — LLM-based intent understanding
                 try:
                     safe_input = sanitize_user_input(user_input)
                 except ValueError as e:
                     renderer.print_error("输入被拦截", str(e))
                     continue
 
-                has_context = bool(report_gen._current_projects)
-                parsed = nl_parser.parse(safe_input, has_context=has_context)
+                # Use LLM to understand intent
+                intent = report_gen.researcher._understand_intent(safe_input)
+                action = intent["action"]
+                params = intent["params"]
 
-                if parsed.intent == IntentType.FOLLOWUP and has_context:
-                    # Follow-up mode
-                    feedback_session.set_agent("followup")
-                    with renderer.create_progress("Agent 思考中..."):
-                        response = report_gen.handle_followup(user_input)
-                    renderer.print_panel("🤖 Agent", response, style="cyan")
-                    feedback_session.set_last_interaction(safe_input, response)
+                if action == "search_repositories":
+                    # Detect if user explicitly asked to "analyze"
+                    query = params.get("query", safe_input)
+                    sort = params.get("sort", "stars")
+                    limit = min(params.get("limit", 5), 5)
+
+                    if "分析" in safe_input:
+                        # User wants a full analysis report
+                        feedback_session.set_agent("report")
+                        with renderer.create_progress(f"生成报告：{query}"):
+                            report = report_gen.execute(
+                                query=query, num_projects=limit, sort=sort,
+                            )
+                        renderer.print_success("报告生成完成！")
+                        display_limit = 10000
+                        display_report = report[:display_limit] if len(report) > display_limit else report
+                        feedback_session.set_last_interaction(safe_input, display_report)
+                        if len(report) > display_limit:
+                            renderer.print_panel("📄 报告", display_report)
+                            renderer.print_warning(f"报告已截断（{len(report)} 字符，显示前 {display_limit} 字符）")
+                        else:
+                            renderer.print_panel("📄 报告", display_report)
+                        if studio_enabled:
+                            _push_to_studio("user", user_input, "user")
+                            _push_to_studio("Report", display_report[:8000], "assistant")
+                    else:
+                        # Simple search — just show results table
+                        feedback_session.set_agent("researcher")
+                        with renderer.create_progress(f"搜索：{query}"):
+                            search_result = report_gen.researcher.search_and_analyze(
+                                query=query, sort=sort, per_page=limit,
+                            )
+
+                        repos = search_result.get("repositories", [])
+                        if repos:
+                            renderer.print_info(f"找到 {len(repos)} 个项目")
+                            rows = []
+                            for i, repo in enumerate(repos[:limit], 1):
+                                desc = repo.get("description", "") or ""
+                                if len(desc) > 50:
+                                    desc = desc[:47] + "..."
+                                rows.append([
+                                    str(i), repo["full_name"],
+                                    f"⭐ {repo['stars']:,}",
+                                    repo.get("language", "") or "N/A",
+                                    desc or "—",
+                                ])
+                            renderer.print_table("搜索结果", ["#", "项目", "Stars", "语言", "简介"], rows)
+                            forwarded_content = "\n".join(
+                                f"{i}. **{r['full_name']}** ⭐ {r['stars']:,} "
+                                f"{r.get('language', '')} — {r.get('description', '')[:50]}"
+                                for i, r in enumerate(repos[:limit], 1)
+                            )
+                        else:
+                            renderer.print_warning("未找到相关项目")
+                            forwarded_content = f"搜索「{query}」未找到相关项目"
+                        feedback_session.set_last_interaction(safe_input, forwarded_content)
+                        if studio_enabled:
+                            _push_to_studio("user", user_input, "user")
+                            _push_to_studio("Researcher", forwarded_content, "assistant")
+
+                elif action == "get_repo_info":
+                    # Single repo lookup
+                    feedback_session.set_agent("researcher")
+                    owner = params.get("owner", "")
+                    repo = params.get("repo", "")
+                    with renderer.create_progress(f"查看项目：{owner}/{repo}"):
+                        result = report_gen.analyst.analyze_project(owner, repo)
+                    if result.get("error"):
+                        renderer.print_error("查询失败", result["error"])
+                    else:
+                        analysis = result.get("analysis", {})
+                        tech = analysis.get("tech_stack", {})
+                        detail_lines = [
+                            f"[bold]{owner}/{repo}[/]",
+                            f"[dim]{result.get('url', '')}[/]", "",
+                            f"[cyan]核心功能:[/] {analysis.get('core_function', 'N/A')}", "",
+                            f"[cyan]技术栈:[/] {tech.get('language', 'N/A')}",
+                        ]
+                        frameworks = tech.get("frameworks", [])
+                        if frameworks:
+                            detail_lines.append(f"  框架: {', '.join(frameworks)}")
+                        deps = tech.get("key_dependencies", [])
+                        if deps:
+                            detail_lines.append(f"  依赖: {', '.join(deps)}")
+                        detail_lines.extend([
+                            "", f"[cyan]架构模式:[/] {analysis.get('architecture_pattern', 'N/A')}",
+                            f"[cyan]成熟度:[/] {analysis.get('maturity_assessment', 'unknown')}",
+                            f"[cyan]适配度:[/] {analysis.get('suitability_score', 0):.0%}", "",
+                            f"[green]推荐:[/] {analysis.get('recommendation', 'N/A')}",
+                        ])
+                        renderer.print_panel("📊 项目详情", "\n".join(detail_lines), style="blue")
+                    resp = result.get("project", f"{owner}/{repo}")
+                    feedback_session.set_last_interaction(safe_input, resp)
                     if studio_enabled:
                         _push_to_studio("user", user_input, "user")
-                        _push_to_studio("Agent", response, "assistant")
+                        _push_to_studio("Researcher", resp, "assistant")
 
-                elif parsed.intent == IntentType.ANALYZE:
+                elif action == "analyze_project":
                     # Analyze a single project
                     feedback_session.set_agent("analyst")
-                    query_parts = parsed.query.split("/")
-                    if len(query_parts) == 2:
-                        owner, repo = query_parts
-                        with renderer.create_progress(f"分析项目：{owner}/{repo}"):
-                            result = report_gen.analyst.analyze_project(owner, repo)
-
-                        if result.get("error"):
-                            resp = f"分析失败：{result['error']}"
-                            renderer.print_error("分析失败", result["error"])
-                        else:
-                            analysis = result.get("analysis", {})
-                            tech = analysis.get("tech_stack", {})
-                            score = analysis.get("suitability_score", 0)
-                            maturity = analysis.get("maturity_assessment", "unknown")
-                            risk_flags = analysis.get("risk_flags", [])
-                            frameworks = tech.get("frameworks", [])
-                            deps = tech.get("key_dependencies", [])
-
-                            resp_lines = [
-                                f"## 分析结果：{owner}/{repo}",
-                                "",
-                                f"核心功能：{analysis.get('core_function', 'N/A')}",
-                                f"技术栈：{tech.get('language', 'N/A')}",
-                            ]
-                            if frameworks:
-                                resp_lines.append(f"框架：{', '.join(frameworks)}")
-                            if deps:
-                                resp_lines.append(f"依赖：{', '.join(deps)}")
-                            resp_lines.extend([
-                                f"架构模式：{analysis.get('architecture_pattern', 'N/A')}",
-                                f"成熟度：{maturity}",
-                                f"适配度：{score:.0%}",
-                            ])
-                            if risk_flags:
-                                resp_lines.append(f"风险：{', '.join(risk_flags[:3])}")
-                            resp_lines.append(f"推荐：{analysis.get('recommendation', 'N/A')}")
-                            resp = "\n".join(resp_lines)
-
-                            detail_lines = [
-                                f"[bold]{owner}/{repo}[/]",
-                                "",
-                                f"[cyan]核心功能:[/] {analysis.get('core_function', 'N/A')}",
-                                f"[cyan]技术栈:[/] {tech.get('language', 'N/A')}",
-                            ]
-                            if frameworks:
-                                detail_lines.append(f"  框架: {', '.join(frameworks)}")
-                            if deps:
-                                detail_lines.append(f"  依赖: {', '.join(deps)}")
-                            detail_lines.extend([
-                                f"[cyan]架构模式:[/] {analysis.get('architecture_pattern', 'N/A')}",
-                                f"[cyan]成熟度:[/] {maturity}",
-                                f"[cyan]适配度:[/] {score:.0%}",
-                            ])
-                            if risk_flags:
-                                detail_lines.append(f"\n[yellow]风险标记:[/] {', '.join(risk_flags[:3])}")
-                            detail_lines.append(f"\n[green]推荐:[/] {analysis.get('recommendation', 'N/A')}")
-
-                            renderer.print_panel("📊 分析结果", "\n".join(detail_lines), style="blue")
-                        feedback_session.set_last_interaction(safe_input, resp)
-                        if studio_enabled:
-                            _push_to_studio("user", f"分析项目：{owner}/{repo}", "user")
-                            _push_to_studio("Analyst", resp, "assistant")
+                    owner = params.get("owner", "")
+                    repo = params.get("repo", "")
+                    with renderer.create_progress(f"分析项目：{owner}/{repo}"):
+                        result = report_gen.analyst.analyze_project(owner, repo)
+                    if result.get("error"):
+                        renderer.print_error("分析失败", result["error"])
                     else:
-                        renderer.print_warning("无法识别项目名，请使用 owner/repo 格式")
-
-                elif parsed.intent == IntentType.SEARCH:
-                    # Search projects
-                    feedback_session.set_agent("researcher")
-                    query = parsed.query
-                    time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
-                    with renderer.create_progress(f"搜索：{query}{time_desc}"):
-                        search_result = report_gen.researcher.search_and_analyze(
-                            query=query,
-                            sort=parsed.sort_by,
-                            per_page=parsed.num_results,
-                        )
-
-                    repos = search_result.get("repositories", [])
-                    # Build content for CLI display
-                    if repos:
-                        renderer.print_info(f"找到 {len(repos)} 个项目")
-                        rows = []
-                        for i, repo in enumerate(repos[:parsed.num_results], 1):
-                            desc = repo.get("description", "") or ""
-                            if len(desc) > 50:
-                                desc = desc[:47] + "..."
-                            rows.append([
-                                str(i),
-                                repo["full_name"],
-                                f"⭐ {repo['stars']:,}",
-                                repo.get("language", "") or "N/A",
-                                desc or "—",
-                            ])
-                        renderer.print_table("搜索结果", ["#", "项目", "Stars", "语言", "简介"], rows)
-                        # Build forwarded content (matching CLI table)
-                        table_lines = [f"## 搜索结果：{query}{time_desc}", ""]
-                        for row in rows:
-                            table_lines.append(f"{row[0]}. **{row[1]}** ⭐ {row[2]} {row[3]} {row[4]}")
-                        forwarded_content = "\n".join(table_lines)
-                    else:
-                        renderer.print_warning("未找到相关项目")
-                        forwarded_content = f"搜索「{query}」未找到相关项目"
-                    feedback_session.set_last_interaction(safe_input, forwarded_content)
-                    if studio_enabled:
-                        _push_to_studio("user", f"搜索：{query}{time_desc}", "user")
-                        _push_to_studio("Researcher", forwarded_content, "assistant")
-
-                elif parsed.intent == IntentType.REPORT:
-                    # Generate detailed report
-                    feedback_session.set_agent("report")
-                    query = parsed.query
-                    time_desc = f" ({parsed.time_range})" if parsed.time_range else ""
-                    with renderer.create_progress(f"生成报告：{query}{time_desc}"):
-                        report = report_gen.execute(
-                            query=query,
-                            num_projects=parsed.num_results,
-                            sort=parsed.sort_by,
-                        )
-                    renderer.print_success("报告生成完成！")
-                    # Display full report (truncate reports exceeding 10,000 characters)
-                    display_limit = 10000
-                    display_report = report[:display_limit] if len(report) > display_limit else report
-                    feedback_session.set_last_interaction(safe_input, display_report)
-                    if len(report) > display_limit:
-                        renderer.print_panel("📄 报告", display_report)
-                        renderer.print_warning(f"报告已截断（{len(report)} 字符，显示前 {display_limit} 字符）")
-                        if studio_enabled:
-                            _push_to_studio("user", f"生成报告：{query}{time_desc}", "user")
-                            _push_to_studio("Report", display_report[:8000], "assistant")
-                    else:
-                        renderer.print_panel("📄 报告", display_report)
-                        if studio_enabled:
-                            _push_to_studio("user", f"生成报告：{query}{time_desc}", "user")
-                            _push_to_studio("Report", display_report[:8000], "assistant")
-
-                else:
-                    # Unknown intent, try to handle as search
-                    feedback_session.set_agent("researcher")
-                    with renderer.create_progress(f"搜索：{user_input}"):
-                        search_result = report_gen.researcher.search_and_analyze(
-                            query=user_input,
-                            sort="stars",
-                            per_page=5,
-                        )
-
-                    repos = search_result.get("repositories", [])
-                    if repos:
-                        renderer.print_info(f"找到 {len(repos)} 个项目")
-                        rows = []
-                        for i, repo in enumerate(repos[:5], 1):
-                            desc = repo.get("description", "") or ""
-                            if len(desc) > 50:
-                                desc = desc[:47] + "..."
-                            rows.append([
-                                str(i),
-                                repo["full_name"],
-                                f"⭐ {repo['stars']:,}",
-                                repo.get("language", "") or "N/A",
-                                desc or "—",
-                            ])
-                        renderer.print_table("搜索结果", ["#", "项目", "Stars", "语言", "简介"], rows)
-                        renderer.print_panel("💡 提示", "使用 '分析第一个' 或 '对比前 3 个' 继续交互")
-                        # Build forwarded content
-                        repo_lines = ["## 搜索结果\n"]
-                        for r in repos[:5]:
-                            desc = r.get("description", "") or ""
-                            if len(desc) > 50:
-                                desc = desc[:47] + "..."
-                            repo_lines.append(
-                                f"- **{r['full_name']}** ⭐ {r['stars']:,} "
-                                f"{r.get('language', '')} — {desc}"
-                            )
-                        forwarded_content = "\n".join(repo_lines)
-                    else:
-                        renderer.print_warning("未找到相关项目，请尝试其他关键词")
-                        forwarded_content = f"搜索「{user_input}」未找到相关项目"
-                    feedback_session.set_last_interaction(safe_input, forwarded_content)
+                        analysis = result.get("analysis", {})
+                        tech = analysis.get("tech_stack", {})
+                        score = analysis.get("suitability_score", 0)
+                        maturity = analysis.get("maturity_assessment", "unknown")
+                        risk_flags = analysis.get("risk_flags", [])
+                        frameworks = tech.get("frameworks", [])
+                        deps = tech.get("key_dependencies", [])
+                        detail_lines = [
+                            f"[bold]{owner}/{repo}[/]", "",
+                            f"[cyan]核心功能:[/] {analysis.get('core_function', 'N/A')}", "",
+                            f"[cyan]技术栈:[/] {tech.get('language', 'N/A')}",
+                        ]
+                        if frameworks:
+                            detail_lines.append(f"  框架: {', '.join(frameworks)}")
+                        if deps:
+                            detail_lines.append(f"  依赖: {', '.join(deps)}")
+                        detail_lines.extend([
+                            "", f"[cyan]架构模式:[/] {analysis.get('architecture_pattern', 'N/A')}",
+                            f"[cyan]成熟度:[/] {maturity}",
+                            f"[cyan]适配度:[/] {score:.0%}",
+                        ])
+                        if risk_flags:
+                            detail_lines.append(f"\n[yellow]风险标记:[/] {', '.join(risk_flags[:3])}")
+                        detail_lines.append(f"\n[green]推荐:[/] {analysis.get('recommendation', 'N/A')}")
+                        renderer.print_panel("📊 分析结果", "\n".join(detail_lines), style="blue")
+                    resp = f"分析 {owner}/{repo} 完成"
+                    feedback_session.set_last_interaction(safe_input, resp)
                     if studio_enabled:
                         _push_to_studio("user", user_input, "user")
-                        _push_to_studio("Researcher", forwarded_content, "assistant")
+                        _push_to_studio("Analyst", resp, "assistant")
+
+                elif action == "compare_repositories":
+                    # Compare projects
+                    feedback_session.set_agent("researcher")
+                    repos_list = params.get("repositories", [])
+                    with renderer.create_progress(f"对比项目：{', '.join(repos_list)}"):
+                        compare_result = report_gen.researcher._execute_compare(
+                            {"repositories": repos_list}, analyst=report_gen.analyst,
+                        )
+                    renderer.print_panel("📊 项目对比", compare_result)
+                    feedback_session.set_last_interaction(safe_input, compare_result)
+                    if studio_enabled:
+                        _push_to_studio("user", user_input, "user")
+                        _push_to_studio("Researcher", compare_result[:8000], "assistant")
+
+                else:
+                    # Chat / general Q&A
+                    feedback_session.set_agent("chat")
+                    with renderer.create_progress("思考中..."):
+                        chat_response = report_gen.researcher._call_llm(safe_input)
+                    renderer.print_panel("🤖 AI", chat_response, style="cyan")
+                    feedback_session.set_last_interaction(safe_input, chat_response)
+                    if studio_enabled:
+                        _push_to_studio("user", user_input, "user")
+                        _push_to_studio("AI", chat_response[:8000], "assistant")
 
         except KeyboardInterrupt:
             print("\n")

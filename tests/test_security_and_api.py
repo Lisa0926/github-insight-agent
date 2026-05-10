@@ -498,7 +498,7 @@ class TestResilientHTTP:
     def test_with_retry_decorator(self):
         """测试重试装饰器"""
         from src.core.resilient_http import with_retry
-        import requests
+        from requests.exceptions import ConnectionError
 
         call_count = 0
 
@@ -507,7 +507,7 @@ class TestResilientHTTP:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise requests.exceptions.ConnectionError("Connection failed")
+                raise ConnectionError("Connection failed")
             return "success"
 
         result = flaky_function()

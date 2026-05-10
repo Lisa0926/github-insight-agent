@@ -820,12 +820,45 @@ class ResearcherAgent(GiaAgentBase):
 
         except Exception as e:
             logger.warning(f"Intent understanding failed: {e}")
-            # Instead of falling back to "chat", fall back to "search_repositories"
-            # with the raw query — this ensures the user's search intent is still honored
+            # Extract English keywords from the query for GitHub search
+            # since GitHub API requires English terms
+            fallback_query = self._extract_search_keywords(user_query)
             return {
                 "action": "search_repositories",
-                "params": {"query": user_query, "sort": "stars", "limit": 5},
+                "params": {"query": fallback_query, "sort": "stars", "limit": 5},
             }
+
+    def _extract_search_keywords(self, query: str) -> str:
+        """
+        Extract English/technical keywords from a query for GitHub search.
+
+        Strips Chinese/non-ASCII text and returns English terms,
+        with common tech-domain defaults for AI-related queries.
+        """
+        # Extract English words (sequences of ASCII letters/digits)
+        english_parts = re.findall(r"[A-Za-z][A-Za-z0-9_\-/\.]+", query)
+        keywords = " ".join(english_parts)
+
+        if keywords:
+            return keywords
+
+        # No English keywords found — use domain defaults based on
+        # detected Chinese domain words
+        domain_hints = []
+        if re.search(r"(人工|智能|AI|机器|学习|模型|大语言|Agent|智能)", query):
+            domain_hints.append("AI")
+        if re.search(r"(框架|framework|架构)", query):
+            domain_hints.append("framework")
+        if re.search(r"(机器人|robot|chatbot|assistant)", query, re.IGNORECASE):
+            domain_hints.append("chatbot")
+        if re.search(r"(网页|web|网站|网站)", query):
+            domain_hints.append("web")
+        if re.search(r"(游戏|game)", query):
+            domain_hints.append("game")
+        if re.search(r"(数据库|database|db)", query):
+            domain_hints.append("database")
+
+        return " ".join(domain_hints) if domain_hints else "AI framework"
 
     def _execute_search(self, params: Dict[str, Any]) -> str:
         """Execute a search_repositories action"""
