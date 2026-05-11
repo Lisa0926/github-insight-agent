@@ -74,8 +74,6 @@ class DashScopeWrapper:
         Returns:
             ChatResponse with content as TextBlock list or ToolUseBlock list
         """
-        from agentscope.model._model_response import ChatResponse, ChatUsage
-
         call_kwargs: Dict[str, Any] = {
             "model": self.model_name,
             "messages": messages,
@@ -102,7 +100,7 @@ class DashScopeWrapper:
             error_text = f"Error: {str(e)}"
             return self._make_error_response(error_text)
 
-    def _handle_success_response(self, resp) -> "ChatResponse":
+    def _handle_success_response(self, resp):
         """Handle a successful DashScope API response."""
         from agentscope.model._model_response import ChatResponse
 
@@ -117,7 +115,7 @@ class DashScopeWrapper:
             usage=usage,
         )
 
-    def _make_error_response(self, error_text: str) -> "ChatResponse":
+    def _make_error_response(self, error_text: str):
         """Create an error ChatResponse."""
         from agentscope.model._model_response import ChatResponse, ChatUsage
         return ChatResponse(
@@ -165,7 +163,7 @@ class DashScopeWrapper:
             )
         return content_blocks
 
-    def _build_tool_use_response(self, tool_calls: list, usage) -> "ChatResponse":
+    def _build_tool_use_response(self, tool_calls: list, usage):
         """Build a ChatResponse for tool call results."""
         from agentscope.model._model_response import ChatResponse
         content_blocks = self._build_tool_use_blocks(tool_calls)
@@ -174,7 +172,7 @@ class DashScopeWrapper:
             usage=usage,
         )
 
-    def _extract_usage(self, resp) -> "ChatUsage":
+    def _extract_usage(self, resp):
         """Extract token usage from a DashScope response."""
         from agentscope.model._model_response import ChatUsage
         resp_usage = getattr(resp, "usage", None)
