@@ -55,6 +55,7 @@ bin/github-mcp-server
 
 # 数据目录
 data/
+!src/data/
 output/
 tmp/
 
