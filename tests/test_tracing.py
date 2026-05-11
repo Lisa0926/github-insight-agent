@@ -200,8 +200,8 @@ class TestTracingConfiguration:
 
             call_kwargs = mock_init.call_args.kwargs
             assert call_kwargs.get("studio_url") == "http://studio:3000"
-            # OTLPSpanExporter auto-appends /v1/traces, so endpoint is just the base URL
-            assert call_kwargs.get("tracing_url") == "http://studio:3000"
+            # tracing_url should include /v1/traces suffix for OTLP endpoint
+            assert call_kwargs.get("tracing_url") == "http://studio:3000/v1/traces"
 
     def test_setup_tracing_standalone(self):
         """_setup_tracing should call agentscope.init with tracing_url only"""

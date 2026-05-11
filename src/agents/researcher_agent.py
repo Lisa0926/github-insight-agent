@@ -391,126 +391,189 @@ class ResearcherAgent(GiaAgentBase):
                 "result": f"Error: {e}",
             }
 
+    def _dispatch_fallback(self, tool_name: str, params: Dict[str, Any]) -> str:
+        """Fallback dispatch when handler methods are not available."""
+        if tool_name == "search_repositories":
+            return ResearcherAgent._fallback_search_repositories(self, params)
+        if tool_name == "get_repo_info":
+            return self._execute_get_repo_info(params)
+        if tool_name == "get_readme":
+            owner = params.get("owner", "")
+            repo = params.get("repo", "")
+            readme = self.github_tool.get_readme(owner, repo)
+            return self.github_tool.clean_readme_text(readme)[:5000]
+        if tool_name == "get_project_summary":
+            return ResearcherAgent._fallback_get_project_summary(self, params)
+        if tool_name == "check_rate_limit":
+            return ResearcherAgent._fallback_check_rate_limit(self)
+        return ResearcherAgent._try_github_tool_fallback(self, tool_name, params)
+
+    def _fallback_search_repositories(self, params: Dict[str, Any]) -> str:
+        query = params.get("query", "")
+        sort = params.get("sort", "stars")
+        order = params.get("order", "desc")
+        per_page = params.get("per_page", params.get("limit", 5))
+        time_range_days = params.get("time_range_days", 0)
+        if time_range_days and time_range_days > 0:
+            start_date = (
+                datetime.now() - timedelta(days=time_range_days)
+            ).strftime("%Y-%m-%d")
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            query = f"created:{start_date}..{end_date} {query}"
+        repos = self.github_tool.search_repositories(
+            query=query, sort=sort, order=order, per_page=min(per_page, 100)
+        )
+        return self._format_search_results(repos, query, per_page)
+
+    def _fallback_get_project_summary(self, params: Dict[str, Any]) -> str:
+        owner = params.get("owner", "")
+        repo = params.get("repo", "")
+        summary = self.github_tool.get_project_summary(
+            owner, repo, max_readme_length=params.get("max_readme_length", 3000)
+        )
+        lines = [
+            f"**{summary['full_name']}**",
+            f"Stars: {summary['stars']:,} | Forks: {summary['forks']:,}",
+            f"Language: {summary['language']}",
+            f"Description: {summary['description']}",
+        ]
+        return "\n".join(lines)
+
+    def _fallback_check_rate_limit(self) -> str:
+        rate_info = self.github_tool.check_rate_limit()
+        if "error" in rate_info:
+            return f"Rate limit error: {rate_info['error']}"
+        return (
+            f"Limit: {rate_info['limit']:,}/hr | "
+            f"Remaining: {rate_info['remaining']:,} | "
+            f"Authenticated: {'Yes' if rate_info.get('authenticated') else 'No'}"
+        )
+
+    def _try_github_tool_fallback(
+        self, tool_name: str, params: Dict[str, Any]
+    ) -> str:
+        if hasattr(self.github_tool, tool_name):
+            method = getattr(self.github_tool, tool_name)
+            if callable(method):
+                return str(method(**params))
+        return f"Unknown tool: {tool_name}"
+
     def _dispatch_tool(self, tool_name: str, params: Dict[str, Any]) -> str:
         """
         Dispatch a tool call to the appropriate handler.
 
         Maps toolkit tool names to execution methods.
         """
-        # GitHub tool group
-        if tool_name == "search_repositories":
-            query = params.get("query", "")
-            sort = params.get("sort", "stars")
-            order = params.get("order", "desc")
-            per_page = params.get("per_page", params.get("limit", 5))
-            time_range_days = params.get("time_range_days", 0)
+        cls = type(self)
+        handlers = {
+            "search_repositories": cls.__dict__.get("_handle_search_repositories"),
+            "get_repo_info": cls.__dict__.get("_handle_get_repo_info"),
+            "get_readme": cls.__dict__.get("_handle_get_readme"),
+            "get_project_summary": cls.__dict__.get("_handle_get_project_summary"),
+            "check_rate_limit": cls.__dict__.get("_handle_check_rate_limit"),
+            "evaluate_code_quality": cls.__dict__.get("_handle_evaluate_code_quality"),
+            "scan_security_code": cls.__dict__.get("_handle_scan_security_code"),
+            "review_code_changes": cls.__dict__.get("_handle_review_code_changes"),
+        }
+        handler = handlers.get(tool_name)
+        if handler:
+            return handler(self, params)
+        return ResearcherAgent._dispatch_fallback(self, tool_name, params)
 
-            if time_range_days and time_range_days > 0:
-                start_date = (
-                    datetime.now() - timedelta(days=time_range_days)
-                ).strftime("%Y-%m-%d")
-                end_date = datetime.now().strftime("%Y-%m-%d")
-                query = f"created:{start_date}..{end_date} {query}"
+    def _handle_search_repositories(self, params: Dict[str, Any]) -> str:
+        query = params.get("query", "")
+        sort = params.get("sort", "stars")
+        order = params.get("order", "desc")
+        per_page = params.get("per_page", params.get("limit", 5))
+        time_range_days = params.get("time_range_days", 0)
 
-            repos = self.github_tool.search_repositories(
-                query=query, sort=sort, order=order, per_page=min(per_page, 100)
+        if time_range_days and time_range_days > 0:
+            start_date = (
+                datetime.now() - timedelta(days=time_range_days)
+            ).strftime("%Y-%m-%d")
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            query = f"created:{start_date}..{end_date} {query}"
+
+        repos = self.github_tool.search_repositories(
+            query=query, sort=sort, order=order, per_page=min(per_page, 100)
+        )
+        return self._format_search_results(repos, query, per_page)
+
+    def _handle_get_repo_info(self, params: Dict[str, Any]) -> str:
+        return self._execute_get_repo_info(params)
+
+    def _handle_get_readme(self, params: Dict[str, Any]) -> str:
+        owner = params.get("owner", "")
+        repo = params.get("repo", "")
+        readme = self.github_tool.get_readme(owner, repo)
+        return self.github_tool.clean_readme_text(readme)[:5000]
+
+    def _handle_get_project_summary(self, params: Dict[str, Any]) -> str:
+        owner = params.get("owner", "")
+        repo = params.get("repo", "")
+        summary = self.github_tool.get_project_summary(
+            owner, repo, max_readme_length=params.get("max_readme_length", 3000)
+        )
+        lines = [
+            f"**{summary['full_name']}**",
+            f"Stars: {summary['stars']:,} | Forks: {summary['forks']:,}",
+            f"Language: {summary['language']}",
+            f"Description: {summary['description']}",
+        ]
+        return "\n".join(lines)
+
+    def _handle_check_rate_limit(self, params: Dict[str, Any]) -> str:
+        rate_info = self.github_tool.check_rate_limit()
+        if "error" in rate_info:
+            return f"Rate limit error: {rate_info['error']}"
+        return (
+            f"Limit: {rate_info['limit']:,}/hr | "
+            f"Remaining: {rate_info['remaining']:,} | "
+            f"Authenticated: {'Yes' if rate_info.get('authenticated') else 'No'}"
+        )
+
+    def _handle_evaluate_code_quality(self, params: Dict[str, Any]) -> str:
+        import asyncio
+        from src.tools.code_quality_tool import evaluate_code_quality as _eval_cq
+        repo_info_json = params.get("repo_info_json", "{}")
+        result = asyncio.get_event_loop().run_until_complete(
+            _eval_cq(
+                params.get("readme_content", ""),
+                json.loads(repo_info_json) if isinstance(repo_info_json, str) else repo_info_json,
+                use_llm=params.get("use_llm", True),
             )
-            return self._format_search_results(repos, query, per_page)
+        )
+        return self._extract_result_text(result)
 
-        elif tool_name == "get_repo_info":
-            owner = params.get("owner", "")
-            repo = params.get("repo", "")
-            return self._execute_get_repo_info({"owner": owner, "repo": repo})
+    def _handle_scan_security_code(self, params: Dict[str, Any]) -> str:
+        import asyncio
+        from src.tools.owasp_security_rules import scan_security as _scan_sec
+        result = asyncio.get_event_loop().run_until_complete(
+            _scan_sec(params.get("file_path", ""), params.get("code_content", ""))
+        )
+        return self._extract_result_text(result)
 
-        elif tool_name == "get_readme":
-            owner = params.get("owner", "")
-            repo = params.get("repo", "")
-            readme = self.github_tool.get_readme(owner, repo)
-            return self.github_tool.clean_readme_text(readme)[:5000]
-
-        elif tool_name == "get_project_summary":
-            owner = params.get("owner", "")
-            repo = params.get("repo", "")
-            summary = self.github_tool.get_project_summary(
-                owner, repo, max_readme_length=params.get("max_readme_length", 3000)
+    def _handle_review_code_changes(self, params: Dict[str, Any]) -> str:
+        import asyncio
+        from src.tools.pr_review_tool import review_pull_request as _review_pr
+        result = asyncio.get_event_loop().run_until_complete(
+            _review_pr(
+                params.get("pr_title", ""),
+                params.get("pr_description", ""),
+                params.get("diff_content", ""),
+                use_llm=params.get("use_llm", True),
             )
-            lines = [
-                f"**{summary['full_name']}**",
-                f"Stars: {summary['stars']:,} | Forks: {summary['forks']:,}",
-                f"Language: {summary['language']}",
-                f"Description: {summary['description']}",
-            ]
-            return "\n".join(lines)
+        )
+        return self._extract_result_text(result)
 
-        elif tool_name == "check_rate_limit":
-            rate_info = self.github_tool.check_rate_limit()
-            if "error" in rate_info:
-                return f"Rate limit error: {rate_info['error']}"
-            return (
-                f"Limit: {rate_info['limit']:,}/hr | "
-                f"Remaining: {rate_info['remaining']:,} | "
-                f"Authenticated: {'Yes' if rate_info.get('authenticated') else 'No'}"
-            )
-
-        # Orphan tool groups
-        elif tool_name == "evaluate_code_quality":
-            import asyncio
-            from src.tools.code_quality_tool import evaluate_code_quality as _eval_cq
-            repo_info_json = params.get("repo_info_json", "{}")
-            result = asyncio.get_event_loop().run_until_complete(
-                _eval_cq(
-                    params.get("readme_content", ""),
-                    json.loads(repo_info_json) if isinstance(repo_info_json, str) else repo_info_json,
-                    use_llm=params.get("use_llm", True),
-                )
-            )
-            if result.success:
-                data = result.data
-                if isinstance(data, dict) and "report_text" in data:
-                    return data["report_text"]
-                return str(data)
-            return f"Error: {result.error_message}"
-
-        elif tool_name == "scan_security_code":
-            import asyncio
-            from src.tools.owasp_security_rules import scan_security as _scan_sec
-            result = asyncio.get_event_loop().run_until_complete(
-                _scan_sec(params.get("file_path", ""), params.get("code_content", ""))
-            )
-            if result.success:
-                data = result.data
-                if isinstance(data, dict) and "report_text" in data:
-                    return data["report_text"]
-                return str(data)
-            return f"Error: {result.error_message}"
-
-        elif tool_name == "review_code_changes":
-            import asyncio
-            from src.tools.pr_review_tool import review_pull_request as _review_pr
-            result = asyncio.get_event_loop().run_until_complete(
-                _review_pr(
-                    params.get("pr_title", ""),
-                    params.get("pr_description", ""),
-                    params.get("diff_content", ""),
-                    use_llm=params.get("use_llm", True),
-                )
-            )
-            if result.success:
-                data = result.data
-                if isinstance(data, dict) and "report_text" in data:
-                    return data["report_text"]
-                return str(data)
-            return f"Error: {result.error_message}"
-
-        # Fallback: try direct method call on github_tool
-        elif hasattr(self.github_tool, tool_name):
-            method = getattr(self.github_tool, tool_name)
-            if callable(method):
-                result = method(**params)
-                return str(result)
-
-        # Unknown tool
-        return f"Unknown tool: {tool_name}"
+    def _extract_result_text(self, result) -> str:
+        """Extract text from a tool result object."""
+        if result.success:
+            data = result.data
+            if isinstance(data, dict) and "report_text" in data:
+                return data["report_text"]
+            return str(data)
+        return f"Error: {result.error_message}"
 
     def _format_search_results(
         self, repos: List[Any], query: str, limit: int

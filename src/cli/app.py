@@ -70,15 +70,15 @@ def _setup_studio(config: ConfigManager) -> None:
 
     # Determine tracing URL:
     # 1. User-specified via AGENTSCOPE_TRACING_URL (highest priority)
-    # 2. Studio base URL (OTLPSpanExporter auto-appends /v1/traces)
+    # 2. Studio base URL + /v1/traces (OTLP endpoint)
     # 3. None (no tracing)
     if config.agentscope_tracing_url:
         tracing_url = config.agentscope_tracing_url
     elif config.agentscope_enable_tracing:
-        tracing_url = studio_url
+        tracing_url = studio_url.rstrip("/") + "/v1/traces"
     else:
         # Always enable tracing to Studio when Studio is reachable
-        tracing_url = studio_url
+        tracing_url = studio_url.rstrip("/") + "/v1/traces"
 
     # Check if Studio server is reachable before initializing
     studio_reachable = _check_studio_reachable(studio_url)
@@ -101,6 +101,10 @@ def _setup_studio(config: ConfigManager) -> None:
     # (gen_ai.conversation.id is required by Studio's trace viewer)
     from src.core.span_injector import configure_span_injector
     configure_span_injector(run_name)
+
+    # Set global studio config for message forwarding
+    from src.core.studio_helper import set_global_studio_config
+    set_global_studio_config(studio_url, run_name)
 
     # Set custom studio config for agents
     from src.agents.researcher_agent import set_studio_config as set_researcher_studio

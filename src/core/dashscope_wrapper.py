@@ -7,6 +7,7 @@ Resolves DashScopeChatModel async compatibility issues.
 Supports native function calling via `tools` parameter.
 """
 
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -92,73 +93,96 @@ class DashScopeWrapper:
             if resp.status_code != 200:
                 error_text = f"DashScope API error: {resp.code} - {resp.message}"
                 logger.error(error_text)
-                return ChatResponse(
-                    content=error_text,
-                    usage=ChatUsage(input_tokens=0, output_tokens=0, time=0),
-                    metadata={"error": error_text},
-                )
+                return self._make_error_response(error_text)
 
-            # Extract message from response
-            # Without tools: API returns choices=None with text at output.text
-            # With tools: API returns choices with tool_calls in message
-            message = resp.output.choices[0].message if resp.output.choices else {}
-            if isinstance(message, dict):
-                text_content = message.get("text", "")
-                tool_calls = message.get("tool_calls", [])
-            else:
-                text_content = ""
-                tool_calls = []
-
-            # Fallback to output.text when choices is None/empty
-            if not text_content and hasattr(resp.output, "text") and resp.output.text:
-                text_content = resp.output.text
-
-            # Extract usage
-            resp_usage = getattr(resp, "usage", None)
-            usage = ChatUsage(
-                input_tokens=resp_usage.get("input_tokens", 0) if resp_usage else 0,
-                output_tokens=resp_usage.get("output_tokens", 0) if resp_usage else 0,
-                time=0,
-            )
-
-            # If model returned tool calls, build ToolUseBlock content
-            if tool_calls:
-                content_blocks: List[Any] = []
-                for tc in tool_calls:
-                    fn = tc.get("function", {})
-                    try:
-                        import json
-                        args = json.loads(fn.get("arguments", "{}"))
-                    except json.JSONDecodeError:
-                        args = {}
-                    content_blocks.append(
-                        ToolUseBlock(
-                            type="tool_use",
-                            id=tc.get("id", f"call_{len(content_blocks)}"),
-                            name=fn.get("name", "unknown"),
-                            input=args,
-                            raw_input=fn.get("arguments", "{}"),
-                        )
-                    )
-                return ChatResponse(
-                    content=content_blocks,
-                    usage=usage,
-                )
-
-            # Text-only response
-            return ChatResponse(
-                content=text_content,
-                usage=usage,
-            )
+            return self._handle_success_response(resp)
 
         except Exception as e:
             logger.error(f"DashScope generation failed: {e}")
             error_text = f"Error: {str(e)}"
-            return ChatResponse(
-                content=error_text,
-                usage=ChatUsage(input_tokens=0, output_tokens=0, time=0),
-                metadata={"error": error_text},
+            return self._make_error_response(error_text)
+
+    def _handle_success_response(self, resp) -> "ChatResponse":
+        """Handle a successful DashScope API response."""
+        from agentscope.model._model_response import ChatResponse
+
+        text_content, tool_calls = self._parse_response_message(resp)
+        usage = self._extract_usage(resp)
+
+        if tool_calls:
+            return self._build_tool_use_response(tool_calls, usage)
+
+        return ChatResponse(
+            content=text_content,
+            usage=usage,
+        )
+
+    def _make_error_response(self, error_text: str) -> "ChatResponse":
+        """Create an error ChatResponse."""
+        from agentscope.model._model_response import ChatResponse, ChatUsage
+        return ChatResponse(
+            content=error_text,
+            usage=ChatUsage(input_tokens=0, output_tokens=0, time=0),
+            metadata={"error": error_text},
+        )
+
+    def _parse_response_message(self, resp) -> tuple:
+        """Parse text content and tool calls from a DashScope response.
+
+        Returns:
+            Tuple of (text_content: str, tool_calls: list)
+        """
+        message = resp.output.choices[0].message if resp.output.choices else {}
+        if isinstance(message, dict):
+            text_content = message.get("text", "")
+            tool_calls = message.get("tool_calls", [])
+        else:
+            text_content = ""
+            tool_calls = []
+
+        if not text_content and hasattr(resp.output, "text") and resp.output.text:
+            text_content = resp.output.text
+
+        return text_content, tool_calls
+
+    def _build_tool_use_blocks(self, tool_calls: list) -> list:
+        """Build ToolUseBlock content blocks from tool call dicts."""
+        content_blocks: List[Any] = []
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            try:
+                args = json.loads(fn.get("arguments", "{}"))
+            except json.JSONDecodeError:
+                args = {}
+            content_blocks.append(
+                ToolUseBlock(
+                    type="tool_use",
+                    id=tc.get("id", f"call_{len(content_blocks)}"),
+                    name=fn.get("name", "unknown"),
+                    input=args,
+                    raw_input=fn.get("arguments", "{}"),
+                )
             )
+        return content_blocks
+
+    def _build_tool_use_response(self, tool_calls: list, usage) -> "ChatResponse":
+        """Build a ChatResponse for tool call results."""
+        from agentscope.model._model_response import ChatResponse
+        content_blocks = self._build_tool_use_blocks(tool_calls)
+        return ChatResponse(
+            content=content_blocks,
+            usage=usage,
+        )
+
+    def _extract_usage(self, resp) -> "ChatUsage":
+        """Extract token usage from a DashScope response."""
+        from agentscope.model._model_response import ChatUsage
+        resp_usage = getattr(resp, "usage", None)
+        return ChatUsage(
+            input_tokens=resp_usage.get("input_tokens", 0) if resp_usage else 0,
+            output_tokens=resp_usage.get("output_tokens", 0) if resp_usage else 0,
+            time=0,
+        )
 
     def extract_tool_calls(self, response) -> List[Dict[str, Any]]:
         """
